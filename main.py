@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from commands.debut import setup_debut
 import os
 import time
 
@@ -38,6 +39,8 @@ async def on_ready():
 # Load commands
 setup_ping(bot, start_time)
 setup_help(bot)
+
+setup_debut(bot)
 
 # Run bot
 bot.run(TOKEN)
