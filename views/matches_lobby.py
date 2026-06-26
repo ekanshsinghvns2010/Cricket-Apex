@@ -201,23 +201,23 @@ class MatchLobbyView(discord.ui.View):
 
         save_matches(matches)
 
-embed = await build_lobby_embed(
-    interaction.guild,
-    self.match_id
-)
+        embed = await build_lobby_embed(
+            interaction.guild,
+            self.match_id
+        )
 
-await interaction.response.edit_message(
-    embed=embed,
-    view=self
-)
+        await interaction.response.edit_message(
+            embed=embed,
+            view=self
+        )
 
-# Check if both teams are full
-if (
-    len(match["red_team"]) == match["team_size"]
-    and
-    len(match["blue_team"]) == match["team_size"]
-):
-    print(f"🏏 Match {self.match_id} is ready to start!")
+        # Check if both teams are full
+        if (
+            len(match["red_team"]) == match["team_size"]
+            and
+            len(match["blue_team"]) == match["team_size"]
+        ):
+            print(f"🏏 Match {self.match_id} is ready to start!")
 
     @discord.ui.button(
         label="Join Blue",
