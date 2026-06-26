@@ -210,3 +210,143 @@ class MatchLobbyView(discord.ui.View):
             embed=embed,
             view=self
         )
+
+    @discord.ui.button(
+        label="Join Blue",
+        style=discord.ButtonStyle.primary,
+        emoji="🔵"
+    )
+    async def join_blue(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        matches = load_matches()
+
+        match = matches.get(self.match_id)
+
+        if match is None:
+            await interaction.response.send_message(
+                "❌ This match no longer exists.",
+                ephemeral=True
+            )
+            return
+
+        uid = str(interaction.user.id)
+
+        if uid in match["blue_team"]:
+            await interaction.response.send_message(
+                "❌ You are already in Blue Team.",
+                ephemeral=True
+            )
+            return
+
+        if uid in match["red_team"]:
+            await interaction.response.send_message(
+                "❌ Leave Red Team first.",
+                ephemeral=True
+            )
+            return
+
+        if len(match["blue_team"]) >= match["team_size"]:
+            await interaction.response.send_message(
+                "❌ Blue Team is full.",
+                ephemeral=True
+            )
+            return
+
+        match["blue_team"].append(uid)
+
+        if match["blue_captain"] is None:
+            match["blue_captain"] = uid
+
+        save_matches(matches)
+
+        embed = await build_lobby_embed(
+            interaction.guild,
+            self.match_id
+        )
+
+        await interaction.response.edit_message(
+            embed=embed,
+            view=self
+        )
+
+    @discord.ui.button(
+        label="Leave Match",
+        style=discord.ButtonStyle.secondary,
+        emoji="🚪"
+    )
+    async def leave_match(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        matches = load_matches()
+
+        match = matches.get(self.match_id)
+
+        if match is None:
+            await interaction.response.send_message(
+                "❌ This match no longer exists.",
+                ephemeral=True
+            )
+            return
+
+        uid = str(interaction.user.id)
+
+        # Creator leaves -> End Match
+        if uid == match["creator"]:
+
+            del matches[self.match_id]
+            save_matches(matches)
+
+            ended_embed = discord.Embed(
+                title="🏏 MATCH ENDED",
+                description="❌ The match creator left the lobby.\n\nThis match has been closed.",
+                color=discord.Color.red()
+            )
+
+            for child in self.children:
+                child.disabled = True
+
+            await interaction.response.edit_message(
+                embed=ended_embed,
+                view=self
+            )
+            return
+
+        if uid in match["red_team"]:
+            match["red_team"].remove(uid)
+
+        elif uid in match["blue_team"]:
+
+            match["blue_team"].remove(uid)
+
+            if match["blue_captain"] == uid:
+
+                if len(match["blue_team"]) > 0:
+                    match["blue_captain"] = match["blue_team"][0]
+                else:
+                    match["blue_captain"] = None
+
+        else:
+            await interaction.response.send_message(
+                "❌ You are not in this match.",
+                ephemeral=True
+            )
+            return
+
+        save_matches(matches)
+
+        embed = await build_lobby_embed(
+            interaction.guild,
+            self.match_id
+        )
+
+        await interaction.response.edit_message(
+            embed=embed,
+            view=self
+        )

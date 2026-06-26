@@ -32,5 +32,27 @@
         "red_captain": "1451236422785958040",
         "blue_captain": null,
         "created_at": 1782448527
+    },
+    "148718": {
+        "guild_id": "1452851759159574711",
+        "status": "lobby",
+        "creator": "1451236422785958040",
+        "overs": 5,
+        "format": "3v3",
+        "team_size": 3,
+        "stadium": "Gaddafi Stadium",
+        "country": "Pakistan",
+        "weather": "Sunny \u2600\ufe0f",
+        "pitch": "Batting Friendly",
+        "red_team": [
+            "1451236422785958040"
+        ],
+        "blue_team": [],
+        "red_captain": "1451236422785958040",
+        "blue_captain": null,
+        "message_id": null,
+        "channel_id": null,
+        "ready_players": [],
+        "created_at": 1782483882
     }
 }
