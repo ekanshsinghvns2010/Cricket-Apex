@@ -1,0 +1,22 @@
+{
+  "match_id": {
+    "status": "lobby",
+    "creator": "USER_ID",
+
+    "overs": 20,
+    "format": "11v11",
+    "team_size": 11,
+
+    "red_team": [],
+    "blue_team": [],
+
+    "red_captain": "USER_ID",
+    "blue_captain": null,
+
+    "created_at": 1234567890,
+
+    "stadium": "",
+    "country": "",
+    "weather": ""
+  }
+}

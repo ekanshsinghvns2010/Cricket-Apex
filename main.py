@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from commands.debut import setup_debut
+from commands.profile import setup_profile
+from commands.play import setup_play
 import os
 import time
 
@@ -41,6 +43,7 @@ setup_ping(bot, start_time)
 setup_help(bot)
 
 setup_debut(bot)
-
+setup_profile(bot)
+setup_play(bot)
 # Run bot
 bot.run(TOKEN)
