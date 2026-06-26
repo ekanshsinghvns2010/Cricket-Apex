@@ -36,5 +36,43 @@
         "winner": null,
         "player_of_match": null,
         "created_at": 1782495077
+    },
+    "710889": {
+        "guild_id": "1452851759159574711",
+        "status": "lobby",
+        "creator": "1451236422785958040",
+        "overs": 5,
+        "format": "3v3",
+        "team_size": 3,
+        "stadium": "Eden Gardens",
+        "country": "India",
+        "weather": "Cloudy \u2601\ufe0f",
+        "pitch": "Spin Friendly",
+        "red_team": [
+            "1451236422785958040"
+        ],
+        "blue_team": [],
+        "red_captain": "1451236422785958040",
+        "blue_captain": null,
+        "message_id": "1520122592801853593",
+        "channel_id": "1452851760183115870",
+        "ready_players": [],
+        "state": "LOBBY",
+        "toss_winner": null,
+        "toss_choice": null,
+        "innings": 1,
+        "batting_team": null,
+        "bowling_team": null,
+        "runs": 0,
+        "wickets": 0,
+        "overs_completed": 0,
+        "balls": 0,
+        "target": null,
+        "striker": null,
+        "non_striker": null,
+        "current_bowler": null,
+        "winner": null,
+        "player_of_match": null,
+        "created_at": 1782495868
     }
 }
