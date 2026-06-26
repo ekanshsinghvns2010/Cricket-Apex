@@ -3,7 +3,8 @@ import json
 
 from utils.stadium import get_random_stadium
 from utils.match_utils import create_match
-
+from views.match_lobby import MatchLobbyView
+from utils.match_utils import set_lobby_message
 
 def setup_play(bot):
 
@@ -153,4 +154,15 @@ def setup_play(bot):
             text="Join buttons will be available in the next update."
         )
 
-        await ctx.send(embed=embed)
+        view = MatchLobbyView(match_id)
+
+        message = await ctx.send(
+            embed=embed,
+            view=view
+        )
+
+        set_lobby_message(
+            match_id,
+            ctx.channel.id,
+            message.id
+        )
