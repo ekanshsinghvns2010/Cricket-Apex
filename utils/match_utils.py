@@ -58,7 +58,30 @@ def create_match(
         "message_id": None,
 "channel_id": None,
 "ready_players": [],
+        "state": "LOBBY",
 
+"toss_winner": None,
+"toss_choice": None,
+
+"innings": 1,
+
+"batting_team": None,
+"bowling_team": None,
+
+"runs": 0,
+"wickets": 0,
+
+"overs_completed": 0,
+"balls": 0,
+
+"target": None,
+
+"striker": None,
+"non_striker": None,
+"current_bowler": None,
+
+"winner": None,
+"player_of_match": None,
         "created_at": int(time.time())
     }
 
