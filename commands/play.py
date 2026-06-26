@@ -3,7 +3,7 @@ import json
 
 from utils.stadium import get_random_stadium
 from utils.match_utils import create_match
-from views.match_lobby import MatchLobbyView
+from views.matches_lobby import MatchLobbyView
 from utils.match_utils import set_lobby_message
 
 def setup_play(bot):
