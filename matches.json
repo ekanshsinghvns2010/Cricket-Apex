@@ -1,22 +1,36 @@
 {
-  "match_id": {
-    "status": "lobby",
-    "creator": "USER_ID",
-
-    "overs": 20,
-    "format": "11v11",
-    "team_size": 11,
-
-    "red_team": [],
-    "blue_team": [],
-
-    "red_captain": "USER_ID",
-    "blue_captain": null,
-
-    "created_at": 1234567890,
-
-    "stadium": "",
-    "country": "",
-    "weather": ""
-  }
+    "match_id": {
+        "status": "lobby",
+        "creator": "USER_ID",
+        "overs": 20,
+        "format": "11v11",
+        "team_size": 11,
+        "red_team": [],
+        "blue_team": [],
+        "red_captain": "USER_ID",
+        "blue_captain": null,
+        "created_at": 1234567890,
+        "stadium": "",
+        "country": "",
+        "weather": ""
+    },
+    "329542": {
+        "guild_id": "1452851759159574711",
+        "status": "lobby",
+        "creator": "1451236422785958040",
+        "overs": 20,
+        "format": "11v11",
+        "team_size": 11,
+        "stadium": "Newlands",
+        "country": "South Africa",
+        "weather": "Sunny \u2600\ufe0f",
+        "pitch": "Pace Friendly",
+        "red_team": [
+            "1451236422785958040"
+        ],
+        "blue_team": [],
+        "red_captain": "1451236422785958040",
+        "blue_captain": null,
+        "created_at": 1782448527
+    }
 }
