@@ -51,6 +51,8 @@ def create_match(
 
         "red_team": [str(creator_id)],
         "blue_team": [],
+        "red_bots": [],
+        "blue_bots": [],
 
         "red_captain": str(creator_id),
         "blue_captain": None,

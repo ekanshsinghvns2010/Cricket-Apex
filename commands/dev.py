@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import random
+
 from utils.match_utils import (
     load_matches,
     save_matches,
@@ -26,20 +27,12 @@ def setup_dev(bot):
             return
 
         matches = load_matches()
-
         match = matches[match_id]
 
         bot_names = [
-            "Aarav",
-            "Vivaan",
-            "Kabir",
-            "Arjun",
-            "Rohan",
-            "Viraj",
-            "Aditya",
-            "Dev",
-            "Aryan",
-            "Yash"
+            "Aarav", "Vivaan", "Kabir", "Rohan",
+            "Aryan", "Viraj", "Aditya", "Dev",
+            "Krish", "Yash", "Ishaan", "Ayaan"
         ]
 
         bot_roles = [
@@ -52,21 +45,23 @@ def setup_dev(bot):
             "All-Rounder"
         ]
 
-        bot_number = 1
+        while (
+            len(match["red_team"]) + len(match["red_bots"])
+        ) < match["team_size"]:
 
-        while len(match["red_team"]) < match["team_size"]:
-            bot_id = f"BOT_RED_{bot_number}"
-            match["red_team"].append(bot_id)
-            bot_number += 1
+            match["red_bots"].append({
+                "name": random.choice(bot_names),
+                "role": random.choice(bot_roles)
+            })
 
-        while len(match["blue_team"]) < match["team_size"]:
-            bot_id = f"BOT_BLUE_{bot_number}"
-            match["blue_team"].append(bot_id)
+        while (
+            len(match["blue_team"]) + len(match["blue_bots"])
+        ) < match["team_size"]:
 
-            if match["blue_captain"] is None:
-                match["blue_captain"] = bot_id
-
-            bot_number += 1
+            match["blue_bots"].append({
+                "name": random.choice(bot_names),
+                "role": random.choice(bot_roles)
+            })
 
         save_matches(matches)
 
