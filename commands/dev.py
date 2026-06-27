@@ -7,7 +7,11 @@ from utils.match_utils import (
     save_matches,
     find_player_match
 )
-from views.matches_lobby import build_lobby_embed, MatchLobbyView
+
+from views.matches_lobby import (
+    build_lobby_embed,
+    MatchLobbyView
+)
 
 DEVELOPER_ID = 1451236422785958040
 
@@ -72,7 +76,13 @@ def setup_dev(bot):
             await ctx.send("❌ Couldn't find the match channel.")
             return
 
-        message = await channel.fetch_message(int(match["message_id"]))
+        try:
+            message = await channel.fetch_message(
+                int(match["message_id"])
+            )
+        except Exception:
+            await ctx.send("✅ Lobby filled! (Could not refresh lobby message — it may have been deleted.)")
+            return
 
         embed = await build_lobby_embed(
             ctx.guild,
