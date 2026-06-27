@@ -97,6 +97,16 @@ async def build_lobby_embed(guild, match_id):
         else:
             red += f"**{member.display_name}**\n{icon} {role}\n\n"
 
+    # Show Red Team bots
+    for bot in match["red_bots"]:
+
+        icon = ROLE_ICONS.get(bot["role"], "🤖")
+
+        red += (
+            f"🤖 **{bot['name']}**\n"
+            f"{icon} {bot['role']}\n\n"
+        )
+
     if red == "":
         red = "No players"
 

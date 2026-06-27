@@ -8,7 +8,7 @@ from utils.match_utils import (
     find_player_match
 )
 
-DEVELOPER_ID = 1451236422785958040  # Your Discord ID
+DEVELOPER_ID = 1451236422785958040
 
 
 def setup_dev(bot):
