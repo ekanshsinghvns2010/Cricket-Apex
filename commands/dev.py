@@ -66,20 +66,22 @@ def setup_dev(bot):
 
         save_matches(matches)
 
-        channel = bot.get_channel(match["channel_id"])
+        channel = bot.get_channel(int(match["channel_id"]))
 
-        if channel is not None:
+        if channel is None:
+            await ctx.send("❌ Couldn't find the match channel.")
+            return
 
-            message = await channel.fetch_message(match["message_id"])
+        message = await channel.fetch_message(int(match["message_id"]))
 
-            embed = await build_lobby_embed(
-                ctx.guild,
-                match_id
-            )
+        embed = await build_lobby_embed(
+            ctx.guild,
+            match_id
+        )
 
-            await message.edit(
-                embed=embed,
-                view=MatchLobbyView(match_id)
-            )
+        await message.edit(
+            embed=embed,
+            view=MatchLobbyView(match_id)
+        )
 
         await ctx.send("✅ Lobby filled and refreshed!")
