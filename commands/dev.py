@@ -7,6 +7,7 @@ from utils.match_utils import (
     save_matches,
     find_player_match
 )
+from views.matches_lobby import build_lobby_embed, MatchLobbyView
 
 DEVELOPER_ID = 1451236422785958040
 
@@ -65,4 +66,20 @@ def setup_dev(bot):
 
         save_matches(matches)
 
-        await ctx.send("🤖 Lobby filled successfully!")
+        channel = bot.get_channel(match["channel_id"])
+
+        if channel is not None:
+
+            message = await channel.fetch_message(match["message_id"])
+
+            embed = await build_lobby_embed(
+                ctx.guild,
+                match_id
+            )
+
+            await message.edit(
+                embed=embed,
+                view=MatchLobbyView(match_id)
+            )
+
+        await ctx.send("✅ Lobby filled and refreshed!")
