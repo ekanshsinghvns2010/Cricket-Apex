@@ -142,13 +142,13 @@ async def build_lobby_embed(guild, match_id):
         blue = "No players"
 
     embed.add_field(
-        name=f"🔴 Red Team ({len(match['red_team'])}/{match['team_size']})",
+        name=f"🔴 Red Team ({len(match['red_team'])+len(match['red_bots'])}/{match['team_size']})",
         value=red,
         inline=True
     )
 
     embed.add_field(
-        name=f"🔵 Blue Team ({len(match['blue_team'])}/{match['team_size']})",
+        name=f"🔵 Blue Team ({len(match['blue_team'])+len(match['blue_bots'])}/{match['team_size']})",
         value=blue,
         inline=True
     )

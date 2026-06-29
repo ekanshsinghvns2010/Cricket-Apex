@@ -1,6 +1,5 @@
-import discord
-from discord.ext import commands
 import random
+from discord.ext import commands
 
 from utils.match_utils import (
     load_matches,
@@ -50,19 +49,15 @@ def setup_dev(bot):
             "All-Rounder"
         ]
 
-        while (
-            len(match["red_team"]) + len(match["red_bots"])
-        ) < match["team_size"]:
-
+        # Fill Red Team
+        while len(match["red_team"]) + len(match["red_bots"]) < match["team_size"]:
             match["red_bots"].append({
                 "name": random.choice(bot_names),
                 "role": random.choice(bot_roles)
             })
 
-        while (
-            len(match["blue_team"]) + len(match["blue_bots"])
-        ) < match["team_size"]:
-
+        # Fill Blue Team
+        while len(match["blue_team"]) + len(match["blue_bots"]) < match["team_size"]:
             match["blue_bots"].append({
                 "name": random.choice(bot_names),
                 "role": random.choice(bot_roles)
@@ -70,28 +65,29 @@ def setup_dev(bot):
 
         save_matches(matches)
 
-        channel = bot.get_channel(int(match["channel_id"]))
-
-        if channel is None:
-            await ctx.send("❌ Couldn't find the match channel.")
-            return
-
         try:
+            channel = bot.get_channel(int(match["channel_id"]))
+
+            if channel is None:
+                await ctx.send("❌ Couldn't find the match channel.")
+                return
+
             message = await channel.fetch_message(
                 int(match["message_id"])
             )
-        except Exception:
-            await ctx.send("✅ Lobby filled! (Could not refresh lobby message — it may have been deleted.)")
-            return
 
-        embed = await build_lobby_embed(
-            ctx.guild,
-            match_id
-        )
+            embed = await build_lobby_embed(
+                ctx.guild,
+                match_id
+            )
 
-        await message.edit(
-            embed=embed,
-            view=MatchLobbyView(match_id)
-        )
+            await message.edit(
+                embed=embed,
+                view=MatchLobbyView(match_id)
+            )
 
-        await ctx.send("✅ Lobby filled and refreshed!")
+            await ctx.send("✅ Lobby filled and refreshed!")
+
+        except Exception as e:
+            await ctx.send(f"❌ Fill Error: {type(e).__name__}: {e}")
+            raise
