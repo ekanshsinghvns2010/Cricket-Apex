@@ -102,11 +102,11 @@ def find_player_match(user_id):
 
     user_id = str(user_id)
 
+    latest_match = None
     for match_id, match in matches.items():
-        if user_id in match["red_team"] or user_id in match["blue_team"]:
-            return match_id
-
-    return None
+        if(user_id in match["red_team"] or user_id in match ["blue_teams"]):
+            latest_match = match_id 
+            return latest_match
 
 
 def join_team(match_id, user_id, team):

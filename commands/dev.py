@@ -71,7 +71,9 @@ def setup_dev(bot):
             if channel is None:
                 await ctx.send("❌ Couldn't find the match channel.")
                 return
-
+            print("Match ID:",match_id)
+            print("Channel ID:",match["channel_id"])
+            print("Message ID:",match["message_id"])
             message = await channel.fetch_message(
                 int(match["message_id"])
             )

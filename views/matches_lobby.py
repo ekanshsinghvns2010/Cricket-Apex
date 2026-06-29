@@ -6,6 +6,7 @@ from utils.match_utils import (
     load_matches,
     save_matches
 )
+from utils.countdown import start_countdown 
 
 USER_FILE = "users.json"
 
@@ -233,11 +234,11 @@ class MatchLobbyView(discord.ui.View):
 
         # Check if both teams are full
         if (
-            len(match["red_team"]) == match["team_size"]
+            len(match["red_team"]) + len(match["red_bots"]) == match["team_size"]
             and
-            len(match["blue_team"]) == match["team_size"]
+            len(match["blue_team"]) + len(match["blue_bots"]) == match["team_size"]
         ):
-            print(f"🏏 Match {self.match_id} is ready to start!")
+            await start_countdown(interaction.message, self.match_id)
 
     @discord.ui.button(
         label="Join Blue",
@@ -303,11 +304,11 @@ class MatchLobbyView(discord.ui.View):
 
         # Check if both teams are full
         if (
-            len(match["red_team"]) == match["team_size"]
+            len(match["red_team"]) + len(match["red_bots"]) == match["team_size"]
             and
-            len(match["blue_team"]) == match["team_size"]
+            len(match["blue_team"]) + len(match["blue_bots"]) == match["team_size"]
         ):
-            print(f"🏏 Match {self.match_id} is ready to start!")
+            await start_countdown(interaction.message, self.match_id)
 
     @discord.ui.button(
         label="Leave Match",
