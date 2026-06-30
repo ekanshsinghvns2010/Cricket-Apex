@@ -88,6 +88,7 @@ def setup_dev(bot):
                 embed=embed,
                 view=MatchLobbyView(match_id)
             )
+            print("✅ Lobby message edited successfully")
             from utils.countdown import start_countdown
             print ("Red Humans:",len(match["red_team"]))
             print ("Red Bots:",len(match["red_bots"]))
@@ -105,6 +106,7 @@ def setup_dev(bot):
             #Temporary force the countdown
             print(">>> Calling countdown...")
             await start_countdown(message, match_id)
+            print("Status before countdown call:", match["status"])
             print(">>> Countdown finished")
             
             
