@@ -4,7 +4,7 @@ from utils.match_utils import load_matches, save_matches
 
 
 async def start_countdown(message, match_id):
-
+    print("Countdown started")
     matches = load_matches()
     match = matches.get(str(match_id))
 
@@ -28,8 +28,10 @@ async def start_countdown(message, match_id):
         )
 
         await message.edit(embed=embed)
+        print("First message edited")
 
         await asyncio.sleep(5)
+        print("5 seaconds finished")
 
         embed = message.embeds[0]
 
@@ -41,6 +43,10 @@ async def start_countdown(message, match_id):
         )
 
         await message.edit(embed=embed)
+        print("Toss message edited")
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"COUNTDOWN ERROR:{type(e).__name__}: {e}")
+        raise
+        
+        
