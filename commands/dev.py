@@ -11,6 +11,7 @@ from views.matches_lobby import (
     build_lobby_embed,
     MatchLobbyView
 )
+from utils.countdown import start_countdown
 
 DEVELOPER_ID = 1451236422785958040
 
@@ -87,6 +88,15 @@ def setup_dev(bot):
                 embed=embed,
                 view=MatchLobbyView(match_id)
             )
+            from utils.countdown import start_countdown
+            if(
+                len(match["red_team"]) + len(match["red_bots"]) == match["team_size"]
+                and
+                len(match["blue_team"])
+                 + len(match["blue_bots"]) == match["team_size"]
+                ):
+                await start_countdown(message, match_id)
+            
 
             await ctx.send("✅ Lobby filled and refreshed!")
 

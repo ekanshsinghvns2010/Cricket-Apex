@@ -1,35 +1,46 @@
 import asyncio
-import discord
 
-from utils.match_utils import get_match
+from utils.match_utils import load_matches, save_matches
 
 
 async def start_countdown(message, match_id):
 
-    for i in [5, 4, 3, 2, 1]:
+    matches = load_matches()
+    match = matches.get(str(match_id))
 
-        match = get_match(match_id)
+    if match is None:
+        return
+
+    if match.get("status") == "starting":
+        return
+
+    match["status"] = "starting"
+    save_matches(matches)
+
+    try:
+        embed = message.embeds[0]
+
+        embed.set_field_at(
+            len(embed.fields) - 1,
+            name="Status",
+            value="✅ Both teams full! Match starting in **5** seconds...",
+            inline=False
+        )
+
+        await message.edit(embed=embed)
+
+        await asyncio.sleep(5)
 
         embed = message.embeds[0]
 
         embed.set_field_at(
             len(embed.fields) - 1,
             name="Status",
-            value=f"⏳ Match starts in **{i}**...",
+            value="🪙 Toss Time!",
             inline=False
         )
 
         await message.edit(embed=embed)
 
-        await asyncio.sleep(1)
-
-    embed = message.embeds[0]
-
-    embed.set_field_at(
-        len(embed.fields) - 1,
-        name="Status",
-        value="🪙 Toss Time!",
-        inline=False
-    )
-
-    await message.edit(embed=embed)
+    except Exception:
+        pass
