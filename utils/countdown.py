@@ -4,7 +4,9 @@ from utils.match_utils import load_matches, save_matches
 
 
 async def start_countdown(message, match_id):
-    print("Countdown started")
+
+    from views.matches_lobby import build_lobby_embed
+
     matches = load_matches()
     match = matches.get(str(match_id))
 
@@ -17,36 +19,30 @@ async def start_countdown(message, match_id):
     match["status"] = "starting"
     save_matches(matches)
 
-    try:
-        embed = message.embeds[0]
+    guild = message.guild
+
+    for i in [5, 4, 3, 2, 1]:
+
+        embed = await build_lobby_embed(guild, match_id)
 
         embed.set_field_at(
-            len(embed.fields) - 1,
+            8,  # Status field
             name="Status",
-            value="✅ Both teams full! Match starting in **5** seconds...",
+            value=f"⏳ Match starts in **{i}**...",
             inline=False
         )
 
         await message.edit(embed=embed)
-        print("First message edited")
 
-        await asyncio.sleep(5)
-        print("5 seaconds finished")
+        await asyncio.sleep(1)
 
-        embed = message.embeds[0]
+    embed = await build_lobby_embed(guild, match_id)
 
-        embed.set_field_at(
-            len(embed.fields) - 1,
-            name="Status",
-            value="🪙 Toss Time!",
-            inline=False
-        )
+    embed.set_field_at(
+        8,
+        name="Status",
+        value="🪙 Toss Time!",
+        inline=False
+    )
 
-        await message.edit(embed=embed)
-        print("Toss message edited")
-
-    except Exception as e:
-        print(f"COUNTDOWN ERROR:{type(e).__name__}: {e}")
-        raise
-        
-        
+    await message.edit(embed=embed)
