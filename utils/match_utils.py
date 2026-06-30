@@ -104,7 +104,7 @@ def find_player_match(user_id):
 
     latest_match = None
     for match_id, match in matches.items():
-        if(user_id in match["red_team"] or user_id in match ["blue_teams"]):
+        if user_id in match["red_team"] or user_id in match ["blue_teams"]:
             latest_match = match_id 
             return latest_match
 

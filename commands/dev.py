@@ -89,13 +89,24 @@ def setup_dev(bot):
                 view=MatchLobbyView(match_id)
             )
             from utils.countdown import start_countdown
-            if(
-                len(match["red_team"]) + len(match["red_bots"]) == match["team_size"]
-                and
-                len(match["blue_team"])
-                 + len(match["blue_bots"]) == match["team_size"]
-                ):
-                await start_countdown(message, match_id)
+            print ("Red Humans:",len(match["red_team"]))
+            print ("Red Bots:",len(match["red_bots"]))
+            print ("Blue Humans:",len(match["blue_team"]))
+            print ("Blue Bots:",len(match["blue_bots"]))
+            print ("Team Size :",match["team_size"])
+
+            red_full = (len(match["red_team"]) + len(match["red_bots"])
+                       )
+            blue_full =(len(match["blue_team"]) + len(match["blue_bots"])
+                       )
+            print(f"Red total = {red_full}")
+            print(f"Blue total = {blue_full}")
+            print(f"Required = {match['team_size']}")
+            #Temporary force the countdown
+            print(">>> Calling countdown...")
+            await start_countdown(message, match_id)
+            print(">>> Countdown finished")
+            
             
 
             await ctx.send("✅ Lobby filled and refreshed!")
