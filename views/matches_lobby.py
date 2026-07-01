@@ -6,7 +6,6 @@ from utils.match_utils import (
     load_matches,
     save_matches
 )
-from utils.countdown import start_countdown 
 
 USER_FILE = "users.json"
 
@@ -238,7 +237,10 @@ class MatchLobbyView(discord.ui.View):
             and
             len(match["blue_team"]) + len(match["blue_bots"]) == match["team_size"]
         ):
-            await start_countdown(interaction.message, self.match_id)
+
+            from utils.countdown import start_countdown           
+        await start_countdown(interaction.message, self.match_id)
+
 
     @discord.ui.button(
         label="Join Blue",
@@ -308,6 +310,8 @@ class MatchLobbyView(discord.ui.View):
             and
             len(match["blue_team"]) + len(match["blue_bots"]) == match["team_size"]
         ):
+
+            from utils.countdown import start_countdown           
             await start_countdown(interaction.message, self.match_id)
 
     @discord.ui.button(
