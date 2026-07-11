@@ -1,6 +1,6 @@
 {
     "1451236422785958040": {
-        "coins": 5000,
+        "coins": 5287000,
         "wins": 0,
         "losses": 0,
         "level": 1,
@@ -12,21 +12,40 @@
         "batting": 40,
         "bowling": 40,
         "fitness": 40,
-        "experience": 40
+        "experience": 40,
+        "gems": 4996070,
+        "lifetime_earned": 307670,
+        "lifetime_spent": 24100,
+        "cards": [],
+        "crates": {
+            "common": 98,
+            "rare": 50,
+            "epic": 25,
+            "legendary": 10
+        }
     },
-    "1292146760587804754": {
-        "coins": 5000,
+    "1410301549233569802": {
+        "coins": 500,
         "wins": 0,
         "losses": 0,
         "level": 1,
         "xp": 0,
         "trophies": 0,
         "matches_played": 0,
-        "role": null,
+        "role": "Aggressive Batter",
         "team": null,
         "batting": 40,
         "bowling": 40,
         "fitness": 40,
-        "experience": 40
+        "experience": 40,
+        "gems": 0,
+        "lifetime_earned": 500,
+        "lifetime_spent": 0,
+        "crates": {
+            "common": 0,
+            "rare": 0,
+            "epic": 0,
+            "legendary": 0
+        }
     }
 }

@@ -3,6 +3,7 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["uwhoisd"]
 
 [unitTest]
 language = "python3"

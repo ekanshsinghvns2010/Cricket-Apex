@@ -10,7 +10,9 @@ import time
 
 from commands.ping import setup_ping
 from commands.help import setup_help
-
+from commands.balance import setup_balance
+from commands.shop import setup_shop
+from commands.crate import setup_crate
 # Load .env
 load_dotenv()
 
@@ -42,10 +44,12 @@ async def on_ready():
 # Load commands
 setup_ping(bot, start_time)
 setup_help(bot)
-
 setup_debut(bot)
 setup_profile(bot)
 setup_play(bot)
 setup_dev(bot)
-# Run bot
+setup_balance(bot)
+setup_shop(bot)
+setup_crate(bot)
+#Run bot
 bot.run(TOKEN)

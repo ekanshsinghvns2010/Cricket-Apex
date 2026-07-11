@@ -39,7 +39,7 @@ async def start_countdown(message, match_id):
 
     for i in [5, 4, 3, 2, 1]:
 
-        embed = await
+        embed = await build_lobby_embed(guild, match_id)
 
         embed.set_field_at(
             8,

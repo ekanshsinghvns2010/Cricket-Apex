@@ -32,7 +32,12 @@ def setup_debut(bot):
             "batting": 40,
             "bowling": 40,
             "fitness": 40,
-            "experience": 40
+            "experience": 40,
+            #Economy
+            "coins": 500,
+            "gems": 0,
+            "lifetime_earned": 500,
+             "lifetime_spent": 0
         }
 
         with open("users.json", "w") as f:

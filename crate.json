@@ -1,0 +1,29 @@
+{
+    "common": {
+        "name": "Common Crate",
+        "emoji": "📦",
+        "price": 50000,
+        "rewards": 3
+    },
+
+    "rare": {
+        "name": "Rare Crate",
+        "emoji": "📘",
+        "price": 200000,
+        "rewards": 4
+    },
+
+    "epic": {
+        "name": "Epic Crate",
+        "emoji": "🟣",
+        "price": 1000000,
+        "rewards": 5
+    },
+
+    "legendary": {
+        "name": "Legendary Crate",
+        "emoji": "👑",
+        "price": 5000000,
+        "rewards": 6
+    }
+}
