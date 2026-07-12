@@ -14,7 +14,7 @@ from commands.help import setup_help
 from commands.balance import setup_balance
 from commands.shop import setup_shop
 from commands.crate import setup_crate
-from commands.addplayers import setup_addplayer
+from commands.addplayer import setup_addplayer
 from commands.buy import setup_buy
 from commands.setxi import setup_setxi
 from commands.importplayers import setup_importplayers
