@@ -17,6 +17,7 @@ from commands.crate import setup_crate
 from commands.addplayers import setup_addplayer
 from commands.buy import setup_buy
 from commands.setxi import setup_setxi
+from commands.importplayers import setup_importplayers
 # Load .env
 load_dotenv()
 
@@ -59,6 +60,7 @@ setup_crate(bot)
 setup_addplayer(bot)
 setup_buy(bot)
 setup_setxi(bot)
+setup_importplayers(bot)
 #Run bot
 keep_alive()
 bot.run(TOKEN)
