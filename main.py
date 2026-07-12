@@ -18,6 +18,7 @@ from commands.addplayer import setup_addplayer
 from commands.buy import setup_buy
 from commands.setxi import setup_setxi
 from commands.importplayers import setup_importplayers
+from commands.removeplayer import setup_removeplayer
 # Load .env
 load_dotenv()
 
@@ -61,6 +62,7 @@ setup_addplayer(bot)
 setup_buy(bot)
 setup_setxi(bot)
 setup_importplayers(bot)
+setup_removeplayer(bot)
 #Run bot
 keep_alive()
 bot.run(TOKEN)
