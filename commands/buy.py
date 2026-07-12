@@ -1,19 +1,8 @@
 import discord
 from discord.ext import commands
-import json
-import os
 
+from database import connect_db
 from views.buy_view import BuyView
-
-PLAYERS_FILE = "players.json"
-
-
-def load_players():
-    if not os.path.exists(PLAYERS_FILE):
-        return []
-
-    with open(PLAYERS_FILE, "r") as f:
-        return json.load(f)
 
 
 def setup_buy(bot):
@@ -25,26 +14,27 @@ def setup_buy(bot):
             await ctx.send("❌ Usage: `g!buy <player name>`")
             return
 
-        players = load_players()
 
-        if len(players) == 0:
-            await ctx.send(
-                embed=discord.Embed(
-                    title="❌ No Players",
-                    description="There are no players in the database.",
-                    color=discord.Color.red()
-                )
-            )
-            return
+        conn = connect_db()
+        cursor = conn.cursor()
 
-        player = None
 
-        for p in players:
-            if p["name"].lower() == player_name.lower():
-                player = p
-                break
+        cursor.execute(
+            """
+            SELECT *
+            FROM players
+            WHERE LOWER(name) = LOWER(?)
+            """,
+            (player_name,)
+        )
+
+        player = cursor.fetchone()
+
+        conn.close()
+
 
         if player is None:
+
             await ctx.send(
                 embed=discord.Embed(
                     title="❌ Player Not Found",
@@ -54,14 +44,19 @@ def setup_buy(bot):
             )
             return
 
+
         embed = discord.Embed(
             title=player["name"],
             description=f"🪙 **Price:** {player['price']:,} Coins",
             color=discord.Color.gold()
         )
 
-        if player.get("image"):
-            embed.set_image(url=player["image"])
+
+        if player["image"]:
+            embed.set_image(
+                url=player["image"]
+            )
+
 
         embed.add_field(
             name="Overall",
@@ -83,19 +78,19 @@ def setup_buy(bot):
 
         embed.add_field(
             name="Batting",
-            value=player["batting_ovr"],
+            value=str(player["batting_ovr"]),
             inline=True
         )
 
         embed.add_field(
             name="Bowling",
-            value=player["bowling_ovr"],
+            value=str(player["bowling_ovr"]),
             inline=True
         )
 
         embed.add_field(
             name="Fielding",
-            value=player["fielding_ovr"],
+            value=str(player["fielding_ovr"]),
             inline=True
         )
 
@@ -117,9 +112,13 @@ def setup_buy(bot):
             inline=True
         )
 
-        embed.set_footer(text="Press the Buy button below to purchase this player.")
+
+        embed.set_footer(
+            text="Press the Buy button below to purchase this player."
+        )
+
 
         await ctx.send(
             embed=embed,
-            view=BuyView(player)
+            view=BuyView(dict(player))
         )
