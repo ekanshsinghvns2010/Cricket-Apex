@@ -7,7 +7,7 @@ from views.crate_open_view import CrateOpenView
 
 
 # --------------------------
-# Reward Generator
+# Reward Generatr
 # --------------------------
 
 def generate_rewards(crate_type):

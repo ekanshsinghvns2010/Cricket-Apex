@@ -8,12 +8,13 @@ from commands.play import setup_play
 from commands.dev import setup_dev
 import os
 import time
-
 from commands.ping import setup_ping
 from commands.help import setup_help
 from commands.balance import setup_balance
 from commands.shop import setup_shop
 from commands.crate import setup_crate
+from commands.addplayers import setup_addplayer
+
 # Load .env
 load_dotenv()
 
@@ -53,6 +54,8 @@ setup_dev(bot)
 setup_balance(bot)
 setup_shop(bot)
 setup_crate(bot)
+setup_addplayer(bot)
+
 #Run bot
 keep_alive()
 bot.run(TOKEN)
