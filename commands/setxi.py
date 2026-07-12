@@ -6,8 +6,7 @@ import os
 from views.setxi_view import SetXIView
 
 PLAYERS_FILE = "players.json"
-PROFILES_FILE = "profiles.json"
-
+PROFILES_FILE = "users.json"
 
 def load_json(path):
     if not os.path.exists(path):
