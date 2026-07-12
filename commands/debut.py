@@ -1,5 +1,6 @@
-import json
 import discord
+from database import connect_db
+
 
 def setup_debut(bot):
 
@@ -8,40 +9,61 @@ def setup_debut(bot):
 
         user_id = str(ctx.author.id)
 
-        with open("users.json", "r") as f:
-            users = json.load(f)
+        conn = connect_db()
+        cursor = conn.cursor()
 
-        if user_id in users:
+        cursor.execute(
+            "SELECT user_id FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+
+        if cursor.fetchone():
+            conn.close()
             await ctx.send("❌ You have already made your debut!")
             return
 
-        # Create basic account (NO ROLE YET)
-        users[user_id] = {
-            "coins": 5000,
-            "wins": 0,
-            "losses": 0,
-            "level": 1,
-            "xp": 0,
+        cursor.execute("""
+            INSERT INTO users (
+                user_id,
+                coins,
+                gems,
+                wins,
+                losses,
+                level,
+                xp,
+                trophies,
+                matches_played,
+                role,
+                team,
+                batting,
+                bowling,
+                fitness,
+                experience,
+                lifetime_earned,
+                lifetime_spent
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            500,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            None,
+            None,
+            40,
+            40,
+            40,
+            40,
+            500,
+            0
+        ))
 
-            "trophies": 0,
-            "matches_played": 0,
-
-            "role": None,
-            "team": None,
-
-            "batting": 40,
-            "bowling": 40,
-            "fitness": 40,
-            "experience": 40,
-            #Economy
-            "coins": 500,
-            "gems": 0,
-            "lifetime_earned": 500,
-             "lifetime_spent": 0
-        }
-
-        with open("users.json", "w") as f:
-            json.dump(users, f, indent=4)
+        conn.commit()
 
         embed = discord.Embed(
             title="🏏 OFFICIAL DEBUT CEREMONY",
@@ -52,7 +74,7 @@ def setup_debut(bot):
         embed.add_field(
             name="🎁 Starting Rewards",
             value=(
-                "💰 5000 Coins\n"
+                "💰 500 Coins\n"
                 "⭐ Level 1 Player\n"
                 "🏆 Rookie Status\n"
                 "📊 Career Profile Created"
@@ -63,7 +85,6 @@ def setup_debut(bot):
         embed.add_field(
             name="🎭 Choose Your Role",
             value=(
-                "Reply with:\n"
                 "`1` Aggressive Batter\n"
                 "`2` Finisher Batter\n"
                 "`3` Anchor Batter\n"
@@ -76,9 +97,7 @@ def setup_debut(bot):
 
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
-        msg = await ctx.send(embed=embed)
-
-        # ROLE SELECTION CHECK (simple version)
+        await ctx.send(embed=embed)
 
         def check(m):
             return m.author == ctx.author and m.channel == ctx.channel
@@ -96,18 +115,34 @@ def setup_debut(bot):
             }
 
             if reply.content not in role_map:
-                await ctx.send("❌ Invalid role selection. Use g!debut again.")
+                cursor.execute(
+                    "DELETE FROM users WHERE user_id = ?",
+                    (user_id,)
+                )
+                conn.commit()
+                conn.close()
+
+                await ctx.send("❌ Invalid role selection. Use `g!debut` again.")
                 return
 
-            users[user_id]["role"] = role_map[reply.content]
+            cursor.execute(
+                "UPDATE users SET role = ? WHERE user_id = ?",
+                (role_map[reply.content], user_id)
+            )
 
-            with open("users.json", "w") as f:
-                json.dump(users, f, indent=4)
+            conn.commit()
+            conn.close()
 
             await ctx.send(
-                f"✅ Role assigned: **{role_map[reply.content]}**\n"
-                "🏏 Your career has officially begun!"
+                f"✅ Role assigned: **{role_map[reply.content]}**\n🏏 Your career has officially begun!"
             )
 
         except:
+            cursor.execute(
+                "DELETE FROM users WHERE user_id = ?",
+                (user_id,)
+            )
+            conn.commit()
+            conn.close()
+
             await ctx.send("⏰ Role selection timed out. Use `g!debut` again.")
