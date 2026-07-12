@@ -22,7 +22,6 @@ def save_players(players):
 
 def setup_addplayer(bot):
 
-    # CHANGE THIS TO YOUR DISCORD USER ID
     OWNER_ID = 1451236422785958040
 
     @bot.command(name="addplayer")
@@ -46,13 +45,16 @@ def setup_addplayer(bot):
             ("Fitness", "fitness"),
             ("Rarity", "rarity"),
             ("Price", "price"),
-            ("Image URL or Path", "image")
+            ("Upload Player Image", "image")
         ]
 
         data = {}
 
         def check(m):
-            return m.author == ctx.author and m.channel == ctx.channel
+            return (
+                m.author == ctx.author and
+                m.channel == ctx.channel
+            )
 
         for question, key in questions:
 
@@ -64,9 +66,19 @@ def setup_addplayer(bot):
                     timeout=120,
                     check=check
                 )
-            except:
+
+            except Exception:
                 await ctx.send("❌ Timed out.")
                 return
+
+            if key == "image":
+
+                if len(msg.attachments) == 0:
+                    await ctx.send("❌ Please upload an image.")
+                    return
+
+                data[key] = msg.attachments[0].url
+                continue
 
             value = msg.content
 
@@ -78,12 +90,19 @@ def setup_addplayer(bot):
                 "fitness",
                 "price"
             ]:
-                value = int(value)
+
+                try:
+                    value = int(value)
+
+                except ValueError:
+                    await ctx.send(f"❌ {question} must be a number.")
+                    return
 
             data[key] = value
 
         player = {
             "id": data["name"].lower().replace(" ", "_"),
+
             "name": data["name"],
             "display_name": data["name"].upper(),
 
@@ -115,18 +134,38 @@ def setup_addplayer(bot):
         }
 
         players = load_players()
+
+        # Prevent duplicate players
+        for p in players:
+            if p["id"] == player["id"]:
+                await ctx.send("❌ A player with this name already exists.")
+                return
+
         players.append(player)
         save_players(players)
 
         embed = discord.Embed(
-            title="✅ Player Added",
+            title="✅ Player Added Successfully",
+            description=f"**{player['name']}** has been added to the database.",
             color=discord.Color.green()
         )
 
-        embed.add_field(name="Name", value=player["name"])
-        embed.add_field(name="OVR", value=player["ovr"])
-        embed.add_field(name="Role", value=player["role"])
-        embed.add_field(name="Country", value=player["country"])
-        embed.add_field(name="Rarity", value=player["rarity"])
+        embed.add_field(name="🪙 Price", value=f"{player['price']:,}", inline=True)
+        embed.add_field(name="⭐ OVR", value=player["ovr"], inline=True)
+        embed.add_field(name="🏏 Role", value=player["role"], inline=True)
+
+        embed.add_field(name="🌍 Country", value=player["country"], inline=True)
+        embed.add_field(name="🎖️ Rarity", value=player["rarity"], inline=True)
+        embed.add_field(name="🏏 Team", value=player["team"], inline=True)
+
+        embed.add_field(name="Batting", value=player["batting_ovr"], inline=True)
+        embed.add_field(name="Bowling", value=player["bowling_ovr"], inline=True)
+        embed.add_field(name="Fielding", value=player["fielding_ovr"], inline=True)
+
+        if player["image"]:
+            embed.set_thumbnail(url=player["image"])
+
+        embed.set_footer(text=f"Player ID: {player['id']}")
 
         await ctx.send(embed=embed)
+        
