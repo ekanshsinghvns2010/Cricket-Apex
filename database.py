@@ -67,7 +67,27 @@ def create_tables():
                 image TEXT
             )
         """)
-
+        cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id TEXT PRIMARY KEY,
+        coins INTEGER DEFAULT 500,
+        gems INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1,
+        xp INTEGER DEFAULT 0,
+        trophies INTEGER DEFAULT 0,
+        matches_played INTEGER DEFAULT 0,
+        role TEXT,
+        team TEXT,
+        batting INTEGER DEFAULT 40,
+        bowling INTEGER DEFAULT 40,
+        fitness INTEGER DEFAULT 40,
+        experience INTEGER DEFAULT 40,
+        lifetime_earned INTEGER DEFAULT 0,
+        lifetime_spent INTEGER DEFAULT 0
+    )
+""")
         conn.commit()
 
     finally:
