@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from keep_alive import keep_alive
 from commands.debut import setup_debut
 from commands.profile import setup_profile
 from commands.play import setup_play
@@ -17,6 +18,7 @@ from commands.crate import setup_crate
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
+print(f"Token loaded: {TOKEN is not None}")
 
 # Bot start time
 start_time = time.time()
@@ -52,4 +54,5 @@ setup_balance(bot)
 setup_shop(bot)
 setup_crate(bot)
 #Run bot
+keep_alive()
 bot.run(TOKEN)
