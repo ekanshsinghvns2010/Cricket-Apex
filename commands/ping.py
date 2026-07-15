@@ -5,7 +5,7 @@ import os
 
 Memory= "<:cpu:1522108472777244723>"
 CPU= "<a:rk_loading:1522112218148241570>"
-
+UPTIME = "<a:online:1522248989087498463>"
 
 def setup_ping(bot, start_time):
 
@@ -79,7 +79,7 @@ def setup_ping(bot, start_time):
         )
 
         embed.add_field(
-            name="⏱ Uptime",
+            name=f"{UPTIME} Uptime",
             value=f"`{uptime}`",
             inline=True
         )

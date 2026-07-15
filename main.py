@@ -16,10 +16,12 @@ from commands.shop import setup_shop
 from commands.crate import setup_crate
 from commands.addplayer import setup_addplayer
 from commands.buy import setup_buy
-from commands.setxi import setup_setxi
 from commands.importplayers import setup_importplayers
 from commands.removeplayer import setup_removeplayer
 from backupdb import setup_backupdb
+from commands.players import setup_players
+from database import create_tables
+from commands.xi import setup_xi
 # Load .env
 load_dotenv()
 
@@ -44,7 +46,8 @@ bot = commands.Bot(
 @bot.event
 async def on_ready():
     print("=" * 40)
-    print(f"✅ Logged in as {bot.user}")
+    print(f"✅ Logged in as {bot.user.name}")
+    print (bot.user.id)
     print("🏏 Cricket Bot is Online!")
     print(f"🏠 Connected to {len(bot.guilds)} servers")
     print("=" * 40)
@@ -61,10 +64,12 @@ setup_shop(bot)
 setup_crate(bot)
 setup_addplayer(bot)
 setup_buy(bot)
-setup_setxi(bot)
 setup_importplayers(bot)
 setup_removeplayer(bot)
 setup_backupdb(bot)
+setup_players(bot)
+create_tables()
+setup_xi(bot)
 #Run bot
 keep_alive()
 bot.run(TOKEN)

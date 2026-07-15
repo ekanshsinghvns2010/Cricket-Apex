@@ -1,6 +1,6 @@
 {
     "1451236422785958040": {
-        "coins": 99999999999,
+        "coins": 99991643999,
         "wins": 0,
         "losses": 0,
         "level": 1,
@@ -15,8 +15,13 @@
         "experience": 40,
         "gems": 4996070,
         "lifetime_earned": 307670,
-        "lifetime_spent": 24100,
-        "cards": [],
+        "lifetime_spent": 8380100,
+        "cards": [
+            "jaspreet_bumrah",
+            "rohit_sharma",
+            "16a9390c-3d56-4aa2-932e-67342e69101a",
+            "4faae73e-e28f-423d-a6ea-385e2833341d"
+        ],
         "playing_xi": [],
         "substitutes": [],
         "crates": {

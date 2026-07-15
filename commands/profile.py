@@ -1,6 +1,83 @@
 import json
 import discord
 
+from database import connect_db
+
+ROLE_ORDER = ["WK", "BAT", "AR", "BOWL"]
+
+ROLE_LABELS = {
+    "WK": "🧤 Wicket Keepers",
+    "BAT": "🏏 Batters",
+    "AR": "🎯 All-Rounders",
+    "BOWL": "🎳 Bowlers",
+}
+
+ROLE_EMPTY_PLACEHOLDER = {
+    "WK": "• Empty Wicket Keeper Slot",
+    "BAT": "• Empty Batter Slot",
+    "AR": "• Empty All-Rounder Slot",
+    "BOWL": "• Empty Bowler Slot",
+}
+
+
+def fetch_owned_players(card_ids):
+    """
+    Fetches player rows from SQLite for every id in card_ids.
+    Returns a list of dicts. Ids no longer present in the players
+    table are silently skipped so a stale card never crashes this.
+    """
+    if not card_ids:
+        return []
+
+    conn = connect_db()
+
+    try:
+        cursor = conn.cursor()
+
+        placeholders = ",".join("?" for _ in card_ids)
+        cursor.execute(
+            f"SELECT * FROM players WHERE id IN ({placeholders})",
+            list(card_ids)
+        )
+
+        rows_by_id = {row["id"]: dict(row) for row in cursor.fetchall()}
+
+        return [rows_by_id[cid] for cid in card_ids if cid in rows_by_id]
+
+    finally:
+        conn.close()
+
+
+def group_players_by_role(players):
+    """
+    Groups owned players into the fixed WK/BAT/AR/BOWL categories,
+    sorted by OVR descending within each role. Never requires any
+    minimum number of players in any role.
+    """
+    grouped = {role: [] for role in ROLE_ORDER}
+
+    for player in players:
+        role = player.get("role")
+        if role in grouped:
+            grouped[role].append(player)
+
+    for role in grouped:
+        grouped[role].sort(key=lambda p: p.get("ovr", 0), reverse=True)
+
+    return grouped
+
+
+def format_role_value(players, role):
+    """
+    Returns the embed field text for a single role: one line per
+    owned player, or a single empty-slot placeholder if none owned.
+    """
+    if not players:
+        return ROLE_EMPTY_PLACEHOLDER[role]
+
+    return "\n".join(f"• {p['name']} ({p.get('ovr', 0)} OVR)" for p in players)
+
+
 def setup_profile(bot):
 
     @bot.command()
@@ -82,6 +159,11 @@ def setup_profile(bot):
             "All-Rounder": "🔥 All-Rounder"
         }.get(role, "❔ Not Selected")
 
+        # SQUAD (auto-generated from owned cards, never stored/required)
+        card_ids = user.get("cards", [])
+        owned_players = fetch_owned_players(card_ids)
+        grouped_players = group_players_by_role(owned_players)
+
         # EMBED
         embed = discord.Embed(
             title=f"🏏 {ctx.author.name.upper()}'S CAREER PROFILE",
@@ -136,6 +218,20 @@ def setup_profile(bot):
             inline=False
         )
 
+        # 🏏 SQUAD (auto-generated from cards, fixed WK/BAT/AR/BOWL layout)
+        for squad_role in ROLE_ORDER:
+            embed.add_field(
+                name=ROLE_LABELS[squad_role],
+                value=format_role_value(grouped_players[squad_role], squad_role),
+                inline=False
+            )
+
+        embed.add_field(
+            name="👥 Squad Size",
+            value=f"{len(owned_players)} player(s) owned",
+            inline=False
+        )
+
         # STATUS
         embed.add_field(
             name="🏏 Career Status",
@@ -146,3 +242,4 @@ def setup_profile(bot):
         embed.set_footer(text="Train with g!play | Improve with g!train | Rise in leagues 🏆")
 
         await ctx.send(embed=embed)
+        
