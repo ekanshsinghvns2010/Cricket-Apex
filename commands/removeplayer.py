@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 
 from database import connect_db
-
+from utils.logger import log_action
 
 OWNER_ID = 1451236422785958040
 
@@ -42,6 +42,21 @@ def setup_removeplayer(bot):
 
         conn.commit()
         conn.close()
+        await log_action(
+    bot=bot,
+    title="🗑️ Player Removed",
+    description=(
+        f"**Player:** {player['name']}\n"
+        f"**Country:** {player['country']}\n"
+        f"**Role:** {player['role']}\n"
+        f"**OVR:** {player['ovr']}\n"
+        f"**Rarity:** {player['rarity']}"
+    ),
+    color=discord.Color.red(),
+    user=ctx.author,
+    guild=ctx.guild,
+    channel=ctx.channel
+)
 
         embed = discord.Embed(
             title="🗑️ Player Removed",

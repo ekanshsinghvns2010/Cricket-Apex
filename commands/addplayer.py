@@ -5,7 +5,7 @@ import uuid
 import asyncio
 
 from database import connect_db
-
+from utils.logger import log_action
 OWNER_ID = 1451236422785958040
 
 FIELD_LABELS = [
@@ -405,6 +405,20 @@ def setup_addplayer(bot):
         except sqlite3.Error as e:
             await ctx.send(f"❌ A database error occurred while saving the player: `{e}`")
             return
+            await log_action(
+    bot=bot,
+    title="🆕 Player Added",
+    description=(
+        f"**Player:** {player_name}\n"
+        f"**OVR:** {ovr}\n"
+        f"**Role:** {role}\n"
+        f"**Rarity:** {rarity}"
+    ),
+    color=discord.Color.blue(),
+    user=ctx.author,
+    guild=ctx.guild,
+    channel=ctx.channel
+            )
 
         success_embed = build_success_embed(player)
         await ctx.send(embed=success_embed)

@@ -2,7 +2,7 @@ import discord
 import json
 import logging
 import os
-
+from utils.logger import log_action
 # NOTE: Player data is already loaded from SQLite by the caller and
 # passed into this view as a plain dict (BuyView(player, buyer)). This
 # file does not query the database directly — it only reads/writes the
@@ -162,6 +162,18 @@ class BuyView(discord.ui.View):
         if not success:
             await interaction.response.send_message(error_message, ephemeral=True)
             return
+            await log_action(
+    bot=interaction.client,
+    title="💰 Player Purchased",
+    description=(
+        f"**Player:** {self.player['name']}\n"
+        f"**Price:** {self.player['price']:,} Coins"
+    ),
+    color=discord.Color.green(),
+    user=interaction.user,
+    guild=interaction.guild,
+    channel=interaction.channel
+)
 
         await self._finalize(
             interaction,

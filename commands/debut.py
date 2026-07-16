@@ -1,6 +1,6 @@
 import discord
 from database import connect_db
-
+from utils.logger import log_action
 
 def setup_debut(bot):
 
@@ -121,6 +121,18 @@ def setup_debut(bot):
                 )
                 conn.commit()
                 conn.close()
+                await log_action(
+    bot=bot,
+    title="🎉 New Debut",
+    description=(
+        f"**Player:** {ctx.author.mention}\n"
+        f"**Started their cricket career!**"
+    ),
+    color=discord.Color.green(),
+    user=ctx.author,
+    guild=ctx.guild,
+    channel=ctx.channel
+                )
 
                 await ctx.send("❌ Invalid role selection. Use `g!debut` again.")
                 return

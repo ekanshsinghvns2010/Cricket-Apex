@@ -17,6 +17,7 @@ from views.matches_lobby import (
     MatchLobbyView
 )
 from utils.countdown import start_countdown
+from utils.logger import log_action
 
 DEVELOPER_ID = 1451236422785958040
 
@@ -187,7 +188,22 @@ def setup_dev(bot):
         conn.commit()
         conn.close()
 
+        await log_action(
+    bot=bot,
+    title="👑 Developer Give Command",
+    description=(
+        f"**Developer:** {ctx.author.mention}\n"
+        f"**Target:** {member.mention}\n"
+        f"**Item:** {item.title()}\n"
+        f"**Amount:** {amount}"
+    ),
+    color=discord.Color.gold(),
+    user=ctx.author,
+    guild=ctx.guild,
+    channel=ctx.channel
+)
+
         await ctx.send(
-            f"✅ Added **{amount} {item}** to {member.mention}."
-        )
+    f"✅ Added **{amount} {item}** to {member.mention}."
+)
         

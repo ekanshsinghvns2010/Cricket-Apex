@@ -3,7 +3,7 @@ from discord.ext import commands
 
 from database import connect_db
 from views.buy_view import BuyView
-
+from utils.logger import log_action
 
 def fetch_player(identifier):
     conn = connect_db()
