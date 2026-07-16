@@ -22,6 +22,7 @@ from backupdb import setup_backupdb
 from commands.players import setup_players
 from database import create_tables
 from commands.xi import setup_xi
+from utils.logger import log_error
 # Load .env
 load_dotenv()
 
@@ -72,4 +73,19 @@ create_tables()
 setup_xi(bot)
 #Run bot
 keep_alive()
+@bot.event
+async def on_command_error(ctx, error):
+
+    await log_error(
+        bot=bot,
+        error=error,
+        user=ctx.author,
+        guild=ctx.guild,
+        channel=ctx.channel,
+        command=ctx.message.content
+    )
+
+    await ctx.send(
+        "❌ An unexpected error occurred."
+    )
 bot.run(TOKEN)
