@@ -6,7 +6,7 @@ from datetime import datetime
 # CONFIG
 # ===========================
 
-LOG_CHANNEL_ID = YOUR_LOG_CHANNEL_ID
+LOG_CHANNEL_ID = 1527174625241333780
 
 
 # ===========================
