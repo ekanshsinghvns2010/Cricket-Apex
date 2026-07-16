@@ -88,4 +88,14 @@ async def on_command_error(ctx, error):
     await ctx.send(
         "❌ An unexpected error occurred."
     )
+@bot.command()
+async def logtest(ctx):
+    channel = bot.get_channel(1527174625241333780)
+
+    if channel is None:
+        await ctx.send("Channel not found!")
+        return
+
+    await channel.send("✅ Logger works!")
+    await ctx.send("Sent!")
 bot.run(TOKEN)
