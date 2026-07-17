@@ -88,3 +88,28 @@ def create_tables():
 
 
 create_tables()
+conn = connect_db()
+cursor = conn.cursor()
+
+try:
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN last_daily INTEGER DEFAULT 0"
+    )
+    conn.commit()
+except sqlite3.OperationalError:
+    # Column already exists, ignore
+    pass
+
+conn.close()
+conn = connect_db()
+cursor = conn.cursor()
+
+try:
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN daily_streak INTEGER DEFAULT 0"
+    )
+    conn.commit()
+except sqlite3.OperationalError:
+    pass
+
+conn.close()
