@@ -113,3 +113,20 @@ except sqlite3.OperationalError:
     pass
 
 conn.close()
+conn = connect_db()
+cursor = conn.cursor()
+
+try:
+    cursor.execute("ALTER TABLE users ADD COLUMN cards TEXT DEFAULT '[]'")
+except sqlite3.OperationalError:
+    pass
+
+try:
+    cursor.execute(
+        "ALTER TABLE users ADD COLUMN crates TEXT DEFAULT '{\"common\":0,\"rare\":0,\"epic\":0,\"legendary\":0}'"
+    )
+except sqlite3.OperationalError:
+    pass
+
+conn.commit()
+conn.close()

@@ -118,7 +118,7 @@ def setup_daily(bot):
             return
 
         now = int(time.time())
-
+        print(user.keys())
         last_daily = user["last_daily"]
 
         if now - last_daily < DAILY_COOLDOWN:
@@ -146,7 +146,7 @@ def setup_daily(bot):
 
         for crate_name, amount in crates.items():
             current_crates[crate_name] += amount
-
+        print(user.keys())
         streak = user["daily_streak"] + 1
 
         streak_reward = None

@@ -100,4 +100,7 @@ async def logtest(ctx):
 
     await channel.send("✅ Logger works!")
     await ctx.send("Sent!")
+@bot.event
+async def on_command_error(ctx, error):
+    await ctx.send(f"❌ {type(error).__name__}: {error}")
 bot.run(TOKEN)
