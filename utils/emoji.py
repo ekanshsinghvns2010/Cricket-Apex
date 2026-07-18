@@ -37,6 +37,10 @@ PASS = "<:pass:1522436648976253080>"
 BAG = "<:bag:YOUR_ID>"
 BOX = "<:box:YOUR_ID>"
 KEY = "<:key:YOUR_ID>"
+COMMON = "<:commoncrate:YOUR_EMOJI_ID>"
+RARE = "<:rarecrate:YOUR_EMOJI_ID>"
+EPIC = "<:epiccrate:YOUR_EMOJI_ID>"
+LEGENDARY = "<:legendarycrate:YOUR_EMOJI_ID>"
 
 # ==========================
 # 🏏 Equipment

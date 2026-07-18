@@ -1,64 +1,71 @@
 import discord
 import json
 import logging
-import os
+
+from database import connect_db
 from utils.logger import log_action
+
 # NOTE: Player data is already loaded from SQLite by the caller and
 # passed into this view as a plain dict (BuyView(player, buyer)). This
-# file does not query the database directly — it only reads/writes the
-# user's wallet and card collection in users.json.
-
-USERS_FILE = "users.json"
+# file now also reads/writes the user's wallet and card collection
+# directly in SQLite (the `users` table) instead of users.json.
 
 logger = logging.getLogger(__name__)
 
 
-def load_users():
+def get_user(user_id):
     """
-    Loads users.json, creating it if missing. Returns a dict.
+    Fetches a single user's row from the users table.
 
-    Raises:
-        OSError: if the file cannot be read/created due to I/O issues.
+    Returns:
+        sqlite3.Row | None: the user's row, or None if no profile exists.
     """
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump({}, f, indent=4)
+    conn = connect_db()
 
     try:
-        with open(USERS_FILE, "r") as f:
-            return json.load(f)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE user_id = ?", (str(user_id),))
+        return cursor.fetchone()
+    finally:
+        conn.close()
+
+
+def load_cards(user):
+    """
+    Parses the JSON-encoded `cards` column from a users row into a
+    Python list. Falls back to an empty list if the value is missing
+    or corrupted, so a bad row never crashes a purchase.
+    """
+    raw_cards = user["cards"] if user["cards"] is not None else "[]"
+
+    try:
+        cards = json.loads(raw_cards)
     except json.JSONDecodeError:
-        logger.exception("users.json is corrupted; treating it as empty.")
-        return {}
+        logger.exception("Corrupted cards JSON for user %s; treating as empty.", user["user_id"])
+        return []
+
+    if not isinstance(cards, list):
+        return []
+
+    return cards
 
 
-def save_users(users):
-    """Saves the given users dict back to users.json."""
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
-
-
-def ensure_profile_defaults(profile):
+def update_user_purchase(user_id, coins, lifetime_spent, cards):
     """
-    Ensures a user profile has the fields this view depends on.
-    Mutates and returns the profile dict.
+    Persists the result of a purchase: new coin balance, new
+    lifetime_spent total, and the updated cards list (JSON-encoded).
     """
-    if "cards" not in profile or not isinstance(profile["cards"], list):
-        profile["cards"] = []
+    conn = connect_db()
 
-    if "playing_xi" not in profile or not isinstance(profile["playing_xi"], list):
-        profile["playing_xi"] = []
-
-    if "substitutes" not in profile or not isinstance(profile["substitutes"], list):
-        profile["substitutes"] = []
-
-    if "coins" not in profile or not isinstance(profile["coins"], (int, float)):
-        profile["coins"] = 0
-
-    if "lifetime_spent" not in profile or not isinstance(profile["lifetime_spent"], (int, float)):
-        profile["lifetime_spent"] = 0
-
-    return profile
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET coins = ?, lifetime_spent = ?, cards = ? WHERE user_id = ?",
+            (coins, lifetime_spent, json.dumps(cards), str(user_id))
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class BuyButton(discord.ui.Button):
@@ -162,18 +169,19 @@ class BuyView(discord.ui.View):
         if not success:
             await interaction.response.send_message(error_message, ephemeral=True)
             return
-            await log_action(
-    bot=interaction.client,
-    title="💰 Player Purchased",
-    description=(
-        f"**Player:** {self.player['name']}\n"
-        f"**Price:** {self.player['price']:,} Coins"
-    ),
-    color=discord.Color.green(),
-    user=interaction.user,
-    guild=interaction.guild,
-    channel=interaction.channel
-)
+
+        await log_action(
+            bot=interaction.client,
+            title="💰 Player Purchased",
+            description=(
+                f"**Player:** {self.player['name']}\n"
+                f"**Price:** {self.player['price']:,} Coins"
+            ),
+            color=discord.Color.green(),
+            user=interaction.user,
+            guild=interaction.guild,
+            channel=interaction.channel
+        )
 
         await self._finalize(
             interaction,
@@ -188,37 +196,39 @@ class BuyView(discord.ui.View):
         """
         user_id = str(user_id)
 
-        users = load_users()
+        user = get_user(user_id)
 
-        if user_id not in users:
+        if user is None:
             return False, "❌ You don't have a profile yet."
 
-        profile = ensure_profile_defaults(users[user_id])
+        cards = load_cards(user)
+
+        coins = user["coins"] if user["coins"] is not None else 0
+        lifetime_spent = user["lifetime_spent"] if user["lifetime_spent"] is not None else 0
 
         player_id = self.player.get("id")
         price = self.player.get("price", 0)
 
-        if player_id in profile["cards"]:
+        if player_id in cards:
             return False, "❌ You already own this player."
 
-        if len(profile["cards"]) >= self.MAX_CARDS:
+        if len(cards) >= self.MAX_CARDS:
             return False, (
-                f"❌ Your collection is full ({len(profile['cards'])}/{self.MAX_CARDS}). "
+                f"❌ Your collection is full ({len(cards)}/{self.MAX_CARDS}). "
                 "Sell cards or free up space before buying another player."
             )
 
-        if profile["coins"] < price:
+        if coins < price:
             return False, (
                 f"❌ You don't have enough coins. This player costs {price:,}, "
-                f"but you only have {profile['coins']:,}."
+                f"but you only have {coins:,}."
             )
 
-        profile["coins"] -= price
-        profile["lifetime_spent"] += price
-        profile["cards"].append(player_id)
+        coins -= price
+        lifetime_spent += price
+        cards.append(player_id)
 
-        users[user_id] = profile
-        save_users(users)
+        update_user_purchase(user_id, coins, lifetime_spent, cards)
 
         return True, None
 

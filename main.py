@@ -24,6 +24,7 @@ from database import create_tables
 from commands.xi import setup_xi
 from utils.logger import log_error
 from commands.daily import setup_daily
+from commands.inventory import setup_inventory
 # Load .env
 load_dotenv()
 
@@ -73,6 +74,7 @@ setup_players(bot)
 create_tables()
 setup_xi(bot)
 setup_daily(bot)
+setup_inventory(bot)
 #Run bot
 keep_alive()
 @bot.event
