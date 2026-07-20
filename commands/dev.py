@@ -1,6 +1,6 @@
 import random
 import json
-
+import os
 import discord
 from discord.ext import commands
 
@@ -23,6 +23,35 @@ DEVELOPER_ID = 1451236422785958040
 
 
 def setup_dev(bot):
+
+    @bot.command()
+    async def maintenance(ctx, mode=None):
+
+        if ctx.author.id != DEVELOPER_ID:
+            return
+
+        if mode is None:
+            await ctx.send("Usage: g!maintenance on/off")
+            return
+
+        if mode.lower() == "on":
+            with open("maintenance.json","w") as f:
+                json.dump({"enabled":True},f,indent=4)
+            await bot.change_presence(
+                activity=discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name="🚧 Under Maintenance"
+                )
+            )
+            await ctx.send("✅ Maintenance Enabled")
+
+        elif mode.lower() == "off":
+            with open("maintenance.json","w") as f:
+                                  json.dump({"enabled":False},f,indent=4)
+            await bot.change_presence(
+                activity=discord.Game("g!help | Cricket Go")
+            )
+            await ctx.send("✅ Maintenance Disabled")
 
     @bot.command(name="fill")
     async def fill(ctx):
@@ -189,21 +218,21 @@ def setup_dev(bot):
         conn.close()
 
         await log_action(
-    bot=bot,
-    title="👑 Developer Give Command",
-    description=(
-        f"**Developer:** {ctx.author.mention}\n"
-        f"**Target:** {member.mention}\n"
-        f"**Item:** {item.title()}\n"
-        f"**Amount:** {amount}"
-    ),
-    color=discord.Color.gold(),
-    user=ctx.author,
-    guild=ctx.guild,
-    channel=ctx.channel
-)
+            bot=bot,
+            title="👑 Developer Give Command",
+            description=(
+                f"**Developer:** {ctx.author.mention}\n"
+                f"**Target:** {member.mention}\n"
+                f"**Item:** {item.title()}\n"
+                f"**Amount:** {amount}"
+            ),
+            color=discord.Color.gold(),
+            user=ctx.author,
+            guild=ctx.guild,
+            channel=ctx.channel
+        )
 
         await ctx.send(
-    f"✅ Added **{amount} {item}** to {member.mention}."
-)
+            f"✅ Added **{amount} {item}** to {member.mention}."
+        )
         

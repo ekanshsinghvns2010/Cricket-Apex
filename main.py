@@ -1,5 +1,7 @@
 import discord
 import database
+import json
+OWNER_ID = 1451236422785958040
 from discord.ext import commands
 from dotenv import load_dotenv
 from keep_alive import keep_alive
@@ -55,6 +57,40 @@ async def on_ready():
     print(f"🏠 Connected to {len(bot.guilds)} servers")
     print("=" * 40)
 
+def is_maintenance_enabled() -> bool:
+    try:
+        with open("maintenance.json", "r") as f:
+            data = json.load(f)
+        return data.get("enabled", False)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Fail safe: if the file is missing/corrupt, treat as NOT in maintenance
+        return False
+
+@bot.check
+async def maintenance_check(ctx):
+
+    if ctx.author.id == OWNER_ID:
+        return True
+
+    if not is_maintenance_enabled():
+        return True
+
+    embed = discord.Embed(
+        title="🚧 Scheduled Maintenance",
+        description=(
+            "⚙️ Cricket Apex is currently under maintenance\n\n"
+            "We're working on exciting new features, improvements, and bug fixes "
+            "to give you a better experience.\n\n"
+            "Please check back in a few minutes.\n\n"
+            "Thank you for your patience and support. ❤️"
+        ),
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text="Cricket Apex • We'll be back soon!")
+
+    await ctx.send(embed=embed)
+
+    return False
 # Load commands
 setup_ping(bot, start_time)
 setup_help(bot)
@@ -75,6 +111,7 @@ create_tables()
 setup_xi(bot)
 setup_daily(bot)
 setup_inventory(bot)
+
 #Run bot
 keep_alive()
 @bot.event
@@ -92,6 +129,7 @@ async def on_command_error(ctx, error):
     await ctx.send(
         "❌ An unexpected error occurred."
     )
+
 @bot.command()
 async def logtest(ctx):
     channel = bot.get_channel(1527174625241333780)
