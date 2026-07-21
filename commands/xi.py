@@ -4,8 +4,6 @@ import json
 
 from database import connect_db
 
-USERS_FILE = "users.json"
-
 ROLE_ORDER = {
     "BAT": 1,
     "WK": 2,
@@ -51,33 +49,34 @@ BOWLING_EMOJIS = {
 }
 
 
-def load_users():
-    try:
-        with open(USERS_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        return {}
-
-
 def get_owned_players(user_id):
-    users = load_users()
-
-    profile = users.get(str(user_id))
-
-    if profile is None:
-        return []
-
-    owned_ids = profile.get("cards", [])
-
-    if not owned_ids:
-        return []
-
     conn = connect_db()
 
     try:
         cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT cards FROM users WHERE user_id=?",
+            (str(user_id),)
+        )
+
+        user = cursor.fetchone()
+
+        if user is None:
+            return []
+
+        raw_cards = user["cards"]
+
+        if not raw_cards:
+            return []
+
+        try:
+            owned_ids = json.loads(raw_cards)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+        if not isinstance(owned_ids, list) or not owned_ids:
+            return []
 
         players = []
 
@@ -360,3 +359,4 @@ def setup_xi(bot):
             embed=embed,
             view=view
         )
+        
