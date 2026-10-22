@@ -4,85 +4,82 @@
 from utils.match_utils import load_matches, save_matches
 
 
-def get_team_name(match, team):
-    return match.get(
-        f"{team}_name",
-        team.replace("_", " ").title(),
-    )
+def team_name(match, team):
+    return match.get(f"{team}_name", team.title())
 
 
 def finish_match(match):
-    """Determine and save the result after the chase ends."""
-    team1 = "team1"
-    team2 = "team2"
-
-    batting_team = match.get("batting_team")
-    bowling_team = match.get("bowling_team")
-
-    team_scores = match.setdefault("team_scores", {})
-    current_runs = int(match.get("runs", 0))
+    """Transition innings one to two, or calculate the final result."""
+    batting_team = match.get("batting_team", "red")
+    bowling_team = match.get("bowling_team", "blue")
 
     innings = int(match.get("innings", 1))
+    runs = int(match.get("runs", 0))
+    wickets = int(match.get("wickets", 0))
+
+    scores = match.setdefault("team_scores", {})
 
     if innings == 1:
-        team_scores[batting_team] = current_runs
+        scores[batting_team] = runs
         match["first_innings_team"] = batting_team
-        match["status"] = "innings_break"
-        match["interaction_stage"] = "innings_break"
+        match["target"] = runs + 1
 
-        match["target"] = current_runs + 1
         match["batting_team"] = bowling_team
         match["bowling_team"] = batting_team
-
         match["innings"] = 2
+
         match["runs"] = 0
         match["wickets"] = 0
-        match["overs"] = 0
-        match["balls"] = 0
+        match["overs_completed"] = 0
         match["balls_in_over"] = 0
+        match["balls"] = 0
+
         match["striker"] = None
         match["non_striker"] = None
         match["current_bowler"] = None
         match["previous_bowler"] = None
+
         match["dismissed_players"] = []
-        match["batting_stats"] = {}
-        match["bowling_stats"] = {}
+        match["batted_players"] = []
+        match["dismissed_slot"] = None
+        match["delivery_choices"] = {}
         match["extras"] = {}
+
+        match["status"] = "opening_selection"
+        match["interaction_stage"] = "opening_selection"
 
         return {
             "match_over": False,
             "innings_break": True,
             "message": (
-                f"First innings complete. Target: {match['target']} runs. "
-                "Select the second-innings batters and bowler."
+                f"First innings complete! Target: {runs + 1}. "
+                "Choose the second-innings opening batters and bowler."
             ),
         }
 
-    team_scores[batting_team] = current_runs
+    scores[batting_team] = runs
 
     first_team = match.get("first_innings_team")
-    first_score = int(team_scores.get(first_team, 0))
+    first_score = int(scores.get(first_team, 0))
+    target = int(match.get("target", first_score + 1))
 
-    second_team = batting_team
-    second_score = current_runs
-
-    if second_score > first_score:
-        winner = second_team
-        wickets_left = max(0, 10 - int(match.get("wickets", 0)))
+    if runs >= target:
+        winner = batting_team
+        wickets_left = max(0, 10 - wickets)
         result = (
-            f"{get_team_name(match, winner)} won by "
-            f"{wickets_left} wicket(s)."
+            f"{team_name(match, winner)} won by "
+            f"{wickets_left} wicket(s)!"
         )
-    elif second_score < first_score:
+    elif runs < first_score:
         winner = bowling_team
-        run_margin = first_score - second_score
+        margin = first_score - runs
         result = (
-            f"{get_team_name(match, winner)} won by "
-            f"{run_margin} run(s)."
+            f"{team_name(match, winner)} won by "
+            f"{margin} run(s)!"
         )
     else:
         winner = None
-        result = "The match ended in a tie."
+        result = "The match ended in a tie!"
 
     match["winner"] = winner
     match["result"] = result
@@ -94,14 +91,12 @@ def finish_match(match):
         "innings_break": False,
         "winner": winner,
         "result": result,
+        "message": result,
     }
 
 
 def complete_innings(match_id):
-    """
-    Load the match, calculate the innings transition or final result,
-    and persist the updated state.
-    """
+    """Complete the current innings once and save its state."""
     matches = load_matches()
     key = str(match_id)
 
@@ -110,13 +105,22 @@ def complete_innings(match_id):
 
     match = matches[key]
 
-    if match.get("status") not in {"live", "innings_break"}:
-        raise ValueError("The match is not ready to complete an innings.")
+    if match.get("status") != "innings_break":
+        raise ValueError(
+            "Set the match status to 'innings_break' before completing it."
+        )
 
+    if match.get("innings_result_processed"):
+        raise ValueError("This innings has already been processed.")
+
+    match["innings_result_processed"] = True
     outcome = finish_match(match)
 
-    save_matches(matches)
+    # Allow the second innings to be completed separately.
+    if outcome["innings_break"]:
+        match["innings_result_processed"] = False
 
+    save_matches(matches)
     return match, outcome
 
 
@@ -126,29 +130,24 @@ def build_result_embed(match):
     status = match.get("status")
 
     if status == "completed":
-        title = "🏆 Match Result"
-        color = discord.Color.gold()
-        description = match.get("result", "Match completed.")
-    elif status == "innings_break":
-        title = "🏏 Innings Break"
-        color = discord.Color.blurple()
-        description = (
-            f"Target for the second innings: **{match.get('target', 0)}**"
+        embed = discord.Embed(
+            title="🏆 Match Result",
+            description=match.get("result", "Match completed."),
+            color=discord.Color.gold(),
         )
     else:
-        title = "🏏 Innings Status"
-        color = discord.Color.green()
-        description = f"Current status: {status}"
-
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        color=color,
-    )
+        embed = discord.Embed(
+            title="🏏 Innings Break",
+            description=(
+                f"Target for the second innings: "
+                f"**{match.get('target', 0)} runs**"
+            ),
+            color=discord.Color.blurple(),
+        )
 
     for team, score in match.get("team_scores", {}).items():
         embed.add_field(
-            name=get_team_name(match, team),
+            name=team_name(match, team),
             value=f"{score} runs",
             inline=True,
         )
