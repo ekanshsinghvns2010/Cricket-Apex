@@ -1,362 +1,312 @@
+
+import json
 import discord
 from discord.ext import commands
-import json
 
 from database import connect_db
-
-ROLE_ORDER = {
-    "BAT": 1,
-    "WK": 2,
-    "AR": 3,
-    "BOWL": 4
-}
+from commands.xi import get_owned_players, calculate_team_ovr
 
 
-COUNTRY_FLAGS = {
-    "India": "🇮🇳",
-    "Pakistan": "🇵🇰",
-    "Australia": "🇦🇺",
-    "England": "🏴",
-    "South Africa": "🇿🇦",
-    "Bangladesh": "🇧🇩",
-    "Afghanistan": "🇦🇫",
-    "Sri Lanka": "🇱🇰",
-    "New Zealand": "🇳🇿",
-    "West Indies": "🏝️",
-}
-
-
-CARD_EMOJIS = {
-    "Common": "<:common:1526962292804026418>",
-    "Rare": "🟦",
-    "Epic": "🟪",
-    "Legendary": "🟨",
-    "Icon": "🟥"
-}
-
-
-BOWLING_EMOJIS = {
-    "Right Arm Fast": "⚡",
-    "Left Arm Fast": "⚡",
-    "Right Arm Medium": "🎯",
-    "Left Arm Medium": "🎯",
-    "Off Spin": "🌀",
-    "Offspin": "🌀",
-    "Leg Spin": "🌪️",
-    "Legspin": "🌪️",
-    "Left Arm Orthodox": "🌀",
-    "Chinaman": "🌪️"
-}
-
-
-def get_owned_players(user_id):
+def load_user_xi(user_id):
     conn = connect_db()
-
     try:
         cursor = conn.cursor()
-
         cursor.execute(
-            "SELECT cards FROM users WHERE user_id=?",
-            (str(user_id),)
+            "SELECT playing_xi FROM users WHERE user_id=?",
+            (str(user_id),),
         )
+        row = cursor.fetchone()
 
-        user = cursor.fetchone()
-
-        if user is None:
-            return []
-
-        raw_cards = user["cards"]
-
-        if not raw_cards:
+        if not row or not row["playing_xi"]:
             return []
 
         try:
-            owned_ids = json.loads(raw_cards)
+            data = json.loads(row["playing_xi"])
+            return data if isinstance(data, list) else []
         except (json.JSONDecodeError, TypeError):
             return []
-
-        if not isinstance(owned_ids, list) or not owned_ids:
-            return []
-
-        players = []
-
-        for player_id in owned_ids:
-            cursor.execute(
-                "SELECT * FROM players WHERE id=?",
-                (player_id,)
-            )
-
-            row = cursor.fetchone()
-
-            if row:
-                players.append(dict(row))
-
-        players.sort(
-            key=lambda p: (
-                ROLE_ORDER.get(p["role"], 99),
-                -p["ovr"]
-            )
-        )
-
-        return players
-
     finally:
         conn.close()
 
 
-def calculate_team_ovr(players):
-    if not players:
-        return 0
-
-    total = sum(player["ovr"] for player in players)
-
-    return round(total / len(players))
-
-
-def get_flag(country):
-    return COUNTRY_FLAGS.get(country, "🏳️")
-
-
-def get_card_emoji(rarity):
-    return CARD_EMOJIS.get(rarity, "🟩")
-
-
-def get_bowling_emoji(style):
-    return BOWLING_EMOJIS.get(style, "🏏")
-
-
-def format_player(player):
-    flag = get_flag(player["country"])
-    card = get_card_emoji(player["rarity"])
-    bowl = get_bowling_emoji(player["bowling_style"])
-
-    return (
-        f"{flag} | {card} | "
-        f"**`{player['display_name'][:15]:^15}`** | "
-        f"`{player['ovr']:>2}` | "
-        f"`{player['batting_ovr']:>2}` | "
-        f"`{player['bowling_ovr']:>2}` | "
-        f"{bowl}"
-    )
-
-
-def split_roles(players):
-    bat = []
-    wk = []
-    ar = []
-    bowl = []
-
-    for player in players:
-
-        if player["role"] == "BAT":
-            bat.append(player)
-
-        elif player["role"] == "WK":
-            wk.append(player)
-
-        elif player["role"] == "AR":
-            ar.append(player)
-
-        elif player["role"] == "BOWL":
-            bowl.append(player)
-
-    return bat, wk, ar, bowl
-
-class XIView(discord.ui.View):
-
-    def __init__(self, players):
-        super().__init__(timeout=180)
-
-        self.players = players
-
-    @discord.ui.button(
-        label="Playing XI",
-        style=discord.ButtonStyle.green,
-        emoji="🏏"
-    )
-    async def playing_xi(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        xi = self.players[:11]
-
-        bat, wk, ar, bowl = split_roles(xi)
-
-        description = ""
-
-        description += (
-            "`Country` | `Card` | `Player` | "
-            "`OVR` | `BAT` | `BOWL`\n\n"
+def save_user_xi(user_id, player_ids):
+    conn = connect_db()
+    try:
+        conn.execute(
+            "UPDATE users SET playing_xi=? WHERE user_id=?",
+            (json.dumps(player_ids), str(user_id)),
         )
+        conn.commit()
+    finally:
+        conn.close()
 
-        if bat:
-            description += "__**BATTERS**__\n"
 
-            for player in bat:
-                description += format_player(player) + "\n"
+class XIBuilder(discord.ui.View):
+    def __init__(self, owner_id, players):
+        super().__init__(timeout=300)
+        self.owner_id = int(owner_id)
+        self.players = players
+        self.selected = []
+        self.page = 0
+        self.page_size = 20
+        self.refresh()
 
-            description += "\n"
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "Only the person who opened this XI builder can use it.",
+                ephemeral=True,
+            )
+            return False
+        return True
 
-        if wk:
-            description += "__**WICKET KEEPERS**__\n"
+    def refresh(self):
+        self.clear_items()
 
-            for player in wk:
-                description += format_player(player) + "\n"
+        page_count = max(
+            1,
+            (len(self.players) + self.page_size - 1) // self.page_size,
+        )
+        self.page = max(0, min(self.page, page_count - 1))
 
-            description += "\n"
+        start = self.page * self.page_size
+        end = start + self.page_size
 
-        if ar:
-            description += "__**ALL-ROUNDERS**__\n"
+        options = []
 
-            for player in ar:
-                description += format_player(player) + "\n"
+        for player in self.players[start:end]:
+            player_id = str(player["id"])
+            label = (
+                f"{player.get('display_name') or player.get('name') or player_id}"
+                f" | OVR {player.get('ovr', 0)}"
+            )[:100]
 
-            description += "\n"
-
-        if bowl:
-            description += "__**BOWLERS**__\n"
-
-            for player in bowl:
-                description += format_player(player) + "\n"
-
-            description += "\n"
-
-        if len(xi) == 11:
-            description += "✅ XI is valid for match."
-        else:
-            description += (
-                f"❌ XI incomplete "
-                f"({len(xi)}/11 Players)"
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=player_id,
+                    description=(
+                        f"{player.get('role', 'Unknown role')} • "
+                        f"{player.get('rarity', 'Common')}"
+                    )[:100],
+                    default=player_id in self.selected,
+                )
             )
 
-        embed = discord.Embed(
-            title="🏏 Playing XI",
-            description=description,
-            color=discord.Color.green()
-        )
+        if options:
+            picker = discord.ui.Select(
+                placeholder="Select players for your Playing XI",
+                min_values=0,
+                max_values=min(11, len(options)),
+                options=options,
+                custom_id="xi_builder_player_select",
+            )
+            picker.callback = self.select_players
+            self.add_item(picker)
 
-        embed.set_footer(
-            text=f"Team OVR : {calculate_team_ovr(xi)}"
+        previous = discord.ui.Button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page == 0,
+            row=1,
         )
+        previous.callback = self.previous_page
+        self.add_item(previous)
+
+        next_button = discord.ui.Button(
+            label="Next",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page >= page_count - 1,
+            row=1,
+        )
+        next_button.callback = self.next_page
+        self.add_item(next_button)
+
+        save_button = discord.ui.Button(
+            label="Save Playing XI",
+            style=discord.ButtonStyle.success,
+            emoji="💾",
+            row=2,
+        )
+        save_button.callback = self.save_xi
+        self.add_item(save_button)
+
+        clear_button = discord.ui.Button(
+            label="Clear Selection",
+            style=discord.ButtonStyle.danger,
+            row=2,
+        )
+        clear_button.callback = self.clear_selection
+        self.add_item(clear_button)
+
+    async def select_players(self, interaction):
+        values = list(interaction.data.get("values", []))
+        current_page_ids = {
+            str(p["id"])
+            for p in self.players[
+                self.page * self.page_size:
+                (self.page + 1) * self.page_size
+            ]
+        }
+
+        self.selected = [
+            player_id
+            for player_id in self.selected
+            if player_id not in current_page_ids
+        ]
+
+        self.selected.extend(values)
+
+        if len(self.selected) > 11:
+            self.selected = self.selected[:11]
+
+        self.refresh()
 
         await interaction.response.edit_message(
-            embed=embed,
-            view=self
+            embed=self.build_embed(),
+            view=self,
         )
 
-    @discord.ui.button(
-        label="Substitutes",
-        style=discord.ButtonStyle.blurple,
-        emoji="🪑"
-    )
-    async def substitutes(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def previous_page(self, interaction):
+        self.page -= 1
+        self.refresh()
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self,
+        )
 
-        subs = self.players[11:]
+    async def next_page(self, interaction):
+        self.page += 1
+        self.refresh()
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self,
+        )
 
-        if not subs:
+    async def clear_selection(self, interaction):
+        self.selected = []
+        self.refresh()
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self,
+        )
 
-            embed = discord.Embed(
-                title="🪑 Substitutes",
-                description="You don't have any substitute players.",
-                color=discord.Color.orange()
+    async def save_xi(self, interaction):
+        if len(self.selected) != 11:
+            await interaction.response.send_message(
+                f"Select exactly 11 players first. "
+                f"Currently selected: {len(self.selected)}/11.",
+                ephemeral=True,
             )
-
-            await interaction.response.edit_message(
-                embed=embed,
-                view=self
-            )
-
             return
 
-        text = ""
+        owned_ids = {str(p["id"]) for p in self.players}
 
-        for index, player in enumerate(subs, start=1):
+        if any(player_id not in owned_ids for player_id in self.selected):
+            await interaction.response.send_message(
+                "Your selection contains a card you do not own. Reopen the XI builder.",
+                ephemeral=True,
+            )
+            return
 
-            text += (
-                f"**{index}.** "
-                f"{format_player(player)}\n"
+        save_user_xi(self.owner_id, self.selected)
+
+        self.stop()
+
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="✅ **Playing XI saved!** Your selected batting order is preserved.",
+            embed=self.build_embed(),
+            view=self,
+        )
+
+    def build_embed(self):
+        by_id = {str(p["id"]): p for p in self.players}
+        selected_players = [
+            by_id[player_id]
+            for player_id in self.selected
+            if player_id in by_id
+        ]
+
+        lines = []
+
+        for index, player in enumerate(selected_players, start=1):
+            name = player.get("display_name") or player.get("name") or "Unknown"
+            lines.append(
+                f"**{index}.** {name} — "
+                f"OVR **{player.get('ovr', 0)}** "
+                f"({player.get('role', '?')})"
             )
 
         embed = discord.Embed(
-            title="🪑 Substitute Players",
-            description=text,
-            color=discord.Color.blurple()
+            title="🏏 Playing XI Builder",
+            description=(
+                "Select 11 cards from your collection. "
+                "The order shown here is your batting order.\n\n"
+                "**Selected players**\n"
+                + ("\n".join(lines) if lines else "No players selected.")
+            ),
+            color=discord.Color.green(),
         )
 
+        embed.add_field(
+            name="Selection",
+            value=f"{len(self.selected)}/11 players",
+            inline=True,
+        )
+        embed.add_field(
+            name="Team OVR",
+            value=str(calculate_team_ovr(selected_players)),
+            inline=True,
+        )
         embed.set_footer(
-            text=f"{len(subs)} Substitute Players"
+            text=f"Cards owned: {len(self.players)} • Page {self.page + 1}"
         )
 
-        await interaction.response.edit_message(
-            embed=embed,
-            view=self
-        )
+        return embed
+
 
 def setup_xi(bot):
-
     @bot.command(name="xi")
     async def xi(ctx):
-
         players = get_owned_players(ctx.author.id)
-        for p in players:
-            print(p["name"], p["role"])
 
-        if not players:
+        if len(players) < 11:
             await ctx.send(
-                "❌ You don't own any players.\n"
-                "Buy players using `g!buy` first."
+                f"❌ You need at least 11 owned player cards to create a "
+                f"Playing XI. You currently own {len(players)}.\n"
+                "Get more players and try `g!xi` again."
             )
             return
 
-        playing_xi = players[:11]
+        saved_ids = load_user_xi(ctx.author.id)
+        owned_by_id = {str(p["id"]): p for p in players}
 
-        embed = discord.Embed(
-            title=f"{ctx.author.display_name}'s XI",
-            color=discord.Color.blue()
-        )
+        # Restore the saved batting order, ignoring cards no longer owned.
+        ordered = [
+            owned_by_id[player_id]
+            for player_id in saved_ids
+            if player_id in owned_by_id
+        ]
 
-        embed.description = (
-            f"⭐ **Team OVR:** {calculate_team_ovr(playing_xi)}\n"
-            f"👥 **Players Owned:** {len(players)}\n\n"
-            "Press a button below to view your team."
-        )
+        # Fill the remaining list with cards not already in the saved XI.
+        used = {str(p["id"]) for p in ordered}
+        remaining = [
+            p for p in players
+            if str(p["id"]) not in used
+        ]
 
-        embed.add_field(
-            name="🏏 Playing XI",
-            value=f"{min(len(players),11)}/11 Players",
-            inline=True
-        )
+        view = XIBuilder(ctx.author.id, ordered + remaining)
 
-        embed.add_field(
-            name="🪑 Substitutes",
-            value=str(max(0, len(players) - 11)),
-            inline=True
-        )
-
-        embed.add_field(
-            name="📋 Status",
-            value=(
-                "✅ Ready for Match"
-                if len(playing_xi) == 11
-                else "❌ XI Incomplete"
-            ),
-            inline=False
-        )
-
-        embed.set_footer(
-            text="Use the buttons below to switch between Playing XI and Substitutes."
-        )
-
-        view = XIView(players)
+        # Preselect the existing saved XI in its saved order.
+        view.selected = [
+            str(p["id"]) for p in ordered[:11]
+        ]
+        view.refresh()
 
         await ctx.send(
-            embed=embed,
-            view=view
+            embed=view.build_embed(),
+            view=view,
         )
-        
