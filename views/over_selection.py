@@ -10,13 +10,17 @@ from utils.match_utils import load_matches, save_matches
 def player_id(player):
     if isinstance(player, dict):
         return str(player.get("id", ""))
-    return str(player)
+    return str(player) if player is not None else ""
 
 
 def player_name(player):
     if isinstance(player, dict):
-        return player.get("display_name") or player.get("name", "Unknown")
-    return str(player)
+        return (
+            player.get("display_name")
+            or player.get("name")
+            or "Unknown"
+        )
+    return str(player) if player is not None else "Unknown"
 
 
 def team_xi(match, team):
@@ -32,21 +36,31 @@ def build_bowler_embed(match):
     embed = discord.Embed(
         title="🎯 Select the Next Bowler",
         description=(
-            f"**Bowling team:** {match.get(f'{bowling_team}_name', bowling_team)}\n"
-            f"**Completed overs:** {match.get('overs', 0)}\n"
-            "The bowling captain must select a bowler for the next over."
+            f"**Bowling team:** "
+            f"{match.get(f'{bowling_team}_name', bowling_team)}\n"
+            f"**Completed overs:** {match.get('overs', 0)}\n\n"
+            "The bowling captain must choose a bowler for the next over."
         ),
         color=discord.Color.blue(),
     )
 
     embed.add_field(
         name="Previous over",
-        value=player_name(previous_bowler) if previous_bowler else "None",
+        value=(
+            player_name(previous_bowler)
+            if previous_bowler
+            else "None"
+        ),
         inline=True,
     )
+
     embed.add_field(
         name="Next bowler",
-        value=player_name(current_bowler) if current_bowler else "Not selected",
+        value=(
+            player_name(current_bowler)
+            if current_bowler
+            else "Not selected"
+        ),
         inline=True,
     )
 
@@ -64,14 +78,23 @@ class NextBowlerSelect(Select):
         xi = team_xi(match, bowling_team)
         previous = match.get("previous_bowler")
 
+        previous_id = player_id(previous)
+
+        # Discord select menus allow a maximum of 25 options.
+        eligible = [
+            player
+            for player in xi
+            if player_id(player)
+            and player_id(player) != previous_id
+        ][:25]
+
         options = [
             discord.SelectOption(
                 label=player_name(player)[:100],
                 value=player_id(player),
                 description=f"Player ID: {player_id(player)}"[:100],
             )
-            for player in xi[:25]
-            if player_id(player) != player_id(previous)
+            for player in eligible
         ]
 
         super().__init__(
@@ -80,6 +103,7 @@ class NextBowlerSelect(Select):
             max_values=1,
             options=options,
             custom_id=f"cricket_apex:next_bowler:{self.match_id}",
+            disabled=not options,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -88,12 +112,22 @@ class NextBowlerSelect(Select):
 
         if not match:
             await interaction.response.send_message(
-                "Match not found.", ephemeral=True
+                "Match not found.",
+                ephemeral=True,
+            )
+            return
+
+        if match.get("status") != "bowler_selection":
+            await interaction.response.send_message(
+                "Bowler selection is not open.",
+                ephemeral=True,
             )
             return
 
         bowling_team = match.get("bowling_team", "team2")
-        captain_id = str(match.get(f"{bowling_team}_captain", ""))
+        captain_id = str(
+            match.get(f"{bowling_team}_captain", "")
+        )
 
         if str(interaction.user.id) != captain_id:
             await interaction.response.send_message(
@@ -102,17 +136,16 @@ class NextBowlerSelect(Select):
             )
             return
 
-        if match.get("status") != "bowler_selection":
-            await interaction.response.send_message(
-                "Bowler selection is not open.", ephemeral=True
-            )
-            return
-
         xi = team_xi(match, bowling_team)
+        selected_id = str(self.values[0])
+
+        # Resolve the selection against the current XI, not just
+        # the options originally displayed in Discord.
         selected = next(
             (
-                player for player in xi
-                if player_id(player) == str(self.values[0])
+                player
+                for player in xi
+                if player_id(player) == selected_id
             ),
             None,
         )
@@ -126,7 +159,10 @@ class NextBowlerSelect(Select):
 
         previous = match.get("previous_bowler")
 
-        if previous and player_id(previous) == player_id(selected):
+        if (
+            previous
+            and player_id(previous) == player_id(selected)
+        ):
             await interaction.response.send_message(
                 "A bowler cannot bowl consecutive overs.",
                 ephemeral=True,
@@ -136,6 +172,7 @@ class NextBowlerSelect(Select):
         match["current_bowler"] = selected
         match["interaction_stage"] = "variation"
         match["status"] = "live"
+
         save_matches(matches)
 
         await interaction.response.edit_message(
@@ -165,14 +202,19 @@ async def send_next_bowler_selection(channel, match_id):
     bowling_team = match.get("bowling_team", "team2")
     xi = team_xi(match, bowling_team)
     previous = match.get("previous_bowler")
+    previous_id = player_id(previous)
 
     eligible = [
-        player for player in xi
-        if player_id(player) != player_id(previous)
+        player
+        for player in xi
+        if player_id(player)
+        and player_id(player) != previous_id
     ]
 
     if not eligible:
-        raise ValueError("No eligible bowler is available.")
+        raise ValueError(
+            "No eligible bowler is available in the bowling team's XI."
+        )
 
     return await channel.send(
         embed=build_bowler_embed(match),
