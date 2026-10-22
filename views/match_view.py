@@ -33,35 +33,42 @@ def build_match_embed(match_id):
             color=discord.Color.red(),
         )
 
-    batting_team = match.get("batting_team", "red")
-    bowling_team = match.get("bowling_team", "blue")
     runs = int(match.get("runs", 0))
     wickets = int(match.get("wickets", 0))
     balls = int(match.get("balls", 0))
-    overs = int(match.get("overs", 5))
+    overs_limit = int(
+        match.get("overs_limit", match.get("overs", 5))
+    )
     target = match.get("target")
 
     embed = discord.Embed(
         title="🏏 CRICKET APEX • LIVE MATCH",
         description=(
-            f"**{team_label(batting_team)}**\n"
+            f"**{team_label(match.get('batting_team', 'red'))} batting**\n"
             f"## {runs}/{wickets}\n"
-            f"Overs: **{overs_text(balls)}/{overs}.0**\n"
-            f"Target: **{target if target else '—'}**"
+            f"Overs: **{overs_text(balls)}/{overs_limit}.0**\n"
+            f"Target: **{target if target is not None else '—'}**"
         ),
         color=discord.Color.gold(),
     )
 
     batters = match.get("batters", [])
+
     if batters:
         lines = []
+
         for index, player in enumerate(batters[:2]):
             marker = "🏏" if index == 0 else "　"
-            lines.append(
-                f"{marker} **{player.get('display_name', player.get('name', 'Batter'))}**"
-                f" — {player.get('runs', 0)}"
-                f" ({player.get('balls', 0)})"
+            name = player.get(
+                "display_name",
+                player.get("name", "Batter"),
             )
+            lines.append(
+                f"{marker} **{name}** — "
+                f"{player.get('runs', 0)} "
+                f"({player.get('balls', 0)})"
+            )
+
         embed.add_field(
             name="BATTERS",
             value="\n".join(lines),
@@ -69,6 +76,7 @@ def build_match_embed(match_id):
         )
 
     bowler = match.get("current_bowler")
+
     if bowler:
         embed.add_field(
             name="CURRENT BOWLER",
@@ -81,6 +89,7 @@ def build_match_embed(match_id):
         )
 
     recent = match.get("recent_balls", [])
+
     embed.add_field(
         name="RECENT BALLS",
         value="  ".join(
@@ -90,42 +99,110 @@ def build_match_embed(match_id):
         inline=False,
     )
 
-    embed.set_footer(
-        text=f"Match {match_id} • Cricket Apex"
-    )
+    commentary = match.get("last_commentary")
+
+    if commentary:
+        embed.add_field(
+            name="COMMENTARY",
+            value=commentary[:1024],
+            inline=False,
+        )
+
+    if match.get("result"):
+        embed.add_field(
+            name="MATCH STATUS",
+            value=str(match["result"])[:1024],
+            inline=False,
+        )
+
+    embed.set_footer(text=f"Match {match_id} • Cricket Apex")
     return embed
 
 
 class MatchView(discord.ui.View):
+    """Dynamic, stage-specific controls for a match delivery."""
+
     def __init__(self, match_id):
         super().__init__(timeout=300)
         self.match_id = str(match_id)
+
+        match = get_match(self.match_id)
+
+        if not match or match.get("status") != "live":
+            return
+
+        stage = match.get("interaction_stage", "variation")
+
+        if stage == "variation":
+            bowler = match.get("current_bowler") or {}
+            options = bowling_variations(bowler)
+            self.add_choice_buttons(
+                "variation",
+                options,
+                discord.ButtonStyle.primary,
+            )
+
+        elif stage == "length":
+            self.add_choice_buttons(
+                "length",
+                BOWLING_LENGTHS,
+                discord.ButtonStyle.secondary,
+            )
+
+        elif stage == "shot":
+            self.add_choice_buttons(
+                "shot",
+                BATTING_SHOTS,
+                discord.ButtonStyle.success,
+            )
+
+        elif stage == "intent":
+            self.add_choice_buttons(
+                "intent",
+                BATTING_INTENTS,
+                discord.ButtonStyle.primary,
+            )
+
+    def add_choice_buttons(self, category, options, style):
+        for index, value in enumerate(options):
+            button = discord.ui.Button(
+                label=value,
+                style=style,
+                row=index // 3,
+            )
+
+            async def callback(
+                interaction,
+                selected=value,
+                selected_category=category,
+            ):
+                await self.choose(
+                    interaction,
+                    selected_category,
+                    selected,
+                )
+
+            button.callback = callback
+            self.add_item(button)
 
     def load(self):
         matches = load_matches()
         return matches, matches.get(self.match_id)
 
-    async def refresh(self, interaction, match, content=None):
-        embed = build_match_embed(self.match_id)
-        view = MatchView(self.match_id)
-
-        await interaction.response.edit_message(
-            content=content or self.stage_text(match),
-            embed=embed,
-            view=view,
-        )
-
     def stage_text(self, match):
+        if match.get("status") == "completed":
+            return "🏁 **Innings finished.**"
+
         stage = match.get("interaction_stage", "variation")
-        if stage == "variation":
-            return "⚡ **Bowler's turn — choose a bowling variation.**"
-        if stage == "length":
-            return "🎯 **Choose the delivery length.**"
-        if stage == "shot":
-            return "🏏 **Batter's turn — choose a shot.**"
-        if stage == "intent":
-            return "🔥 **Choose your batting intent.**"
-        return "🏏 Preparing the next delivery..."
+
+        messages = {
+            "variation": "⚡ **Bowler's turn — choose a bowling variation.**",
+            "length": "🎯 **Choose the delivery length.**",
+            "shot": "🏏 **Batter's turn — choose a shot.**",
+            "intent": "🔥 **Choose your batting intent.**",
+        }
+
+        return messages.get(stage, "🏏 Preparing the next delivery...")
 
     async def choose(self, interaction, category, value):
         matches, match = self.load()
@@ -137,21 +214,26 @@ class MatchView(discord.ui.View):
             )
             return
 
-        stage = match.get("interaction_stage", "variation")
+        expected_stage = {
+            "variation": "variation",
+            "length": "length",
+            "shot": "shot",
+            "intent": "intent",
+        }.get(category)
+
+        if match.get("interaction_stage", "variation") != expected_stage:
+            await interaction.response.send_message(
+                "That choice is no longer active. Use the latest match buttons.",
+                ephemeral=True,
+            )
+            return
 
         if category == "variation":
-            if stage != "variation":
-                await interaction.response.send_message(
-                    "That choice is no longer active.",
-                    ephemeral=True,
-                )
-                return
-
             bowler = match.get("current_bowler") or {}
-            options = bowling_variations(bowler)
-            if value not in options:
+
+            if value not in bowling_variations(bowler):
                 await interaction.response.send_message(
-                    "That variation isn't available for this bowler.",
+                    "That variation is not available for this bowler.",
                     ephemeral=True,
                 )
                 return
@@ -160,9 +242,9 @@ class MatchView(discord.ui.View):
             match["interaction_stage"] = "length"
 
         elif category == "length":
-            if stage != "length" or value not in BOWLING_LENGTHS:
+            if value not in BOWLING_LENGTHS:
                 await interaction.response.send_message(
-                    "That choice is no longer active.",
+                    "Invalid bowling length.",
                     ephemeral=True,
                 )
                 return
@@ -171,9 +253,9 @@ class MatchView(discord.ui.View):
             match["interaction_stage"] = "shot"
 
         elif category == "shot":
-            if stage != "shot" or value not in BATTING_SHOTS:
+            if value not in BATTING_SHOTS:
                 await interaction.response.send_message(
-                    "That choice is no longer active.",
+                    "Invalid batting shot.",
                     ephemeral=True,
                 )
                 return
@@ -182,31 +264,43 @@ class MatchView(discord.ui.View):
             match["interaction_stage"] = "intent"
 
         elif category == "intent":
-            if stage != "intent" or value not in BATTING_INTENTS:
+            if value not in BATTING_INTENTS:
                 await interaction.response.send_message(
-                    "That choice is no longer active.",
+                    "Invalid batting intent.",
                     ephemeral=True,
                 )
                 return
 
             match["selected_intent"] = value
             self.resolve_ball(match)
-            match["interaction_stage"] = "variation"
+
+            if match.get("status") == "live":
+                match["interaction_stage"] = "variation"
 
         save_matches(matches)
-        await self.refresh(interaction, match)
+
+        # Rebuild the view so only the current stage's buttons appear.
+        new_view = MatchView(self.match_id)
+        new_embed = build_match_embed(self.match_id)
+
+        await interaction.response.edit_message(
+            content=self.stage_text(match),
+            embed=new_embed,
+            view=new_view,
+        )
 
     def resolve_ball(self, match):
         batters = match.setdefault("batters", [])
-        bowler = match.get("current_bowler") or {}
+        bowler = match.get("current_bowler")
 
+        # Temporary fallback until real card-based XI selection is connected.
         if not batters:
-            # Temporary fallback until the XI selection system is connected.
             batters.extend([
                 {
                     "name": "Batter 1",
                     "display_name": "Batter 1",
                     "batting_ovr": 60,
+                    "fitness": 80,
                     "runs": 0,
                     "balls": 0,
                     "team": match.get("batting_team"),
@@ -215,6 +309,7 @@ class MatchView(discord.ui.View):
                     "name": "Batter 2",
                     "display_name": "Batter 2",
                     "batting_ovr": 60,
+                    "fitness": 80,
                     "runs": 0,
                     "balls": 0,
                     "team": match.get("batting_team"),
@@ -226,10 +321,13 @@ class MatchView(discord.ui.View):
                 "name": "Bowler",
                 "display_name": "Bowler",
                 "bowling_ovr": 60,
+                "fielding_ovr": 60,
                 "fitness": 80,
                 "wickets": 0,
                 "runs_conceded": 0,
+                "legal_balls": 0,
                 "team": match.get("bowling_team"),
+                "bowling_style": "Right Arm Fast",
             }
             match["current_bowler"] = bowler
 
@@ -246,25 +344,39 @@ class MatchView(discord.ui.View):
         )
 
         runs = int(result.get("runs", 0))
-        striker["runs"] = int(striker.get("runs", 0)) + runs
-
-        if result.get("legal"):
-            striker["balls"] = int(striker.get("balls", 0)) + 1
-            match["balls"] = int(match.get("balls", 0)) + 1
+        extra = result.get("extra")
+        wicket = bool(result.get("wicket"))
+        legal = bool(result.get("legal"))
 
         match["runs"] = int(match.get("runs", 0)) + runs
+
+        # In this prototype, a wide is one extra run and no-ball is
+        # represented by one extra run from delivery_result().
+        batter_runs = 0 if extra == "wide" else runs
+
+        striker["runs"] = int(striker.get("runs", 0)) + batter_runs
+
+        if legal:
+            striker["balls"] = int(striker.get("balls", 0)) + 1
+            match["balls"] = int(match.get("balls", 0)) + 1
+            bowler["legal_balls"] = (
+                int(bowler.get("legal_balls", 0)) + 1
+            )
+
         bowler["runs_conceded"] = (
             int(bowler.get("runs_conceded", 0))
-            + (0 if result.get("extra") == "wide" else runs)
+            + (0 if extra == "wide" else runs)
         )
 
-        if result.get("wicket"):
+        if wicket:
             match["wickets"] = int(match.get("wickets", 0)) + 1
             bowler["wickets"] = int(bowler.get("wickets", 0)) + 1
 
-        if result.get("extra"):
-            display = result["extra"].upper()
-        elif result.get("wicket"):
+        if extra == "wide":
+            display = "WD"
+        elif extra == "no-ball":
+            display = "NB"
+        elif wicket:
             display = "W"
         else:
             display = str(runs)
@@ -273,141 +385,36 @@ class MatchView(discord.ui.View):
         recent.append({
             "runs": runs,
             "display": display,
-            "wicket": result.get("wicket", False),
-            "extra": result.get("extra"),
+            "wicket": wicket,
+            "extra": extra,
             "description": result.get("description", ""),
         })
         match["recent_balls"] = recent[-24:]
-        match["last_commentary"] = result.get("description", "")
+        match["last_commentary"] = result.get(
+            "description",
+            "Delivery completed.",
+        )
 
-        # Change striker after an odd number of runs.
-        if runs % 2 == 1 and len(batters) >= 2:
+        # Rotate strike for odd batter runs.
+        if batter_runs % 2 == 1 and len(batters) >= 2:
             batters[0], batters[1] = batters[1], batters[0]
 
-        # Swap ends at the end of a completed over.
-        if result.get("legal") and match["balls"] % 6 == 0:
-            if len(batters) >= 2:
-                batters[0], batters[1] = batters[1], batters[0]
+        # Swap ends after a completed over.
+        if legal and match["balls"] % 6 == 0 and len(batters) >= 2:
+            batters[0], batters[1] = batters[1], batters[0]
 
-        overs_limit = int(match.get("overs", 5))
+        overs_limit = int(
+            match.get("overs_limit", match.get("overs", 5))
+        )
+
         if (
-            match["wickets"] >= 10
-            or match["balls"] >= overs_limit * 6
+            int(match.get("wickets", 0)) >= 10
+            or int(match.get("balls", 0)) >= overs_limit * 6
         ):
             match["status"] = "completed"
             match["state"] = "MATCH_END"
             match["result"] = (
-                f"Innings ended: {match['runs']}/{match['wickets']}."
+                f"Innings ended: "
+                f"{match['runs']}/{match['wickets']} "
+                f"({overs_text(match['balls'])} overs)."
             )
-
-    @discord.ui.button(
-        label="Inswing",
-        style=discord.ButtonStyle.primary,
-        row=0,
-    )
-    async def variation_1(self, interaction, button):
-        await self.choose(interaction, "variation", "Inswing")
-
-    @discord.ui.button(
-        label="Outswing",
-        style=discord.ButtonStyle.primary,
-        row=0,
-    )
-    async def variation_2(self, interaction, button):
-        await self.choose(interaction, "variation", "Outswing")
-
-    @discord.ui.button(
-        label="Seam",
-        style=discord.ButtonStyle.primary,
-        row=0,
-    )
-    async def variation_3(self, interaction, button):
-        await self.choose(interaction, "variation", "Seam")
-
-    @discord.ui.button(
-        label="Slower ball",
-        style=discord.ButtonStyle.primary,
-        row=1,
-    )
-    async def variation_4(self, interaction, button):
-        await self.choose(interaction, "variation", "Slower ball")
-
-    @discord.ui.button(
-        label="Yorker",
-        style=discord.ButtonStyle.secondary,
-        row=2,
-    )
-    async def length_1(self, interaction, button):
-        await self.choose(interaction, "length", "Yorker")
-
-    @discord.ui.button(
-        label="Good length",
-        style=discord.ButtonStyle.secondary,
-        row=2,
-    )
-    async def length_2(self, interaction, button):
-        await self.choose(interaction, "length", "Good length")
-
-    @discord.ui.button(
-        label="Bouncer",
-        style=discord.ButtonStyle.secondary,
-        row=2,
-    )
-    async def length_3(self, interaction, button):
-        await self.choose(interaction, "length", "Bouncer")
-
-    @discord.ui.button(
-        label="Defend",
-        style=discord.ButtonStyle.success,
-        row=3,
-    )
-    async def shot_1(self, interaction, button):
-        await self.choose(interaction, "shot", "Defensive block")
-
-    @discord.ui.button(
-        label="Cover drive",
-        style=discord.ButtonStyle.success,
-        row=3,
-    )
-    async def shot_2(self, interaction, button):
-        await self.choose(interaction, "shot", "Cover drive")
-
-    @discord.ui.button(
-        label="Pull shot",
-        style=discord.ButtonStyle.success,
-        row=3,
-    )
-    async def shot_3(self, interaction, button):
-        await self.choose(interaction, "shot", "Pull shot")
-
-    @discord.ui.button(
-        label="Lofted drive",
-        style=discord.ButtonStyle.danger,
-        row=4,
-    )
-    async def shot_4(self, interaction, button):
-        await self.choose(interaction, "shot", "Lofted drive")
-
-    @discord.ui.button(
-        label="Defensive",
-        style=discord.ButtonStyle.secondary,
-        row=4,
-    )
-    async def intent_1(self, interaction, button):
-        await self.choose(interaction, "intent", "Defensive")
-
-    @discord.ui.button(
-        label="Balanced",
-        style=discord.ButtonStyle.secondary,
-        row=4,
-    )
-    async def intent_2(self, interaction, button):
-        await self.choose(interaction, "intent", "Balanced")
-
-    @discord.ui.button(
-        label="Aggressive",
-        style=discord.ButtonStyle.danger,
-        row=4,
-    )
-    async def intent_3(self, interaction, button):
-        await self.choose(interaction, "intent", "Aggressive")
