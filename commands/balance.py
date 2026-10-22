@@ -1,10 +1,8 @@
+
 import discord
-import json
-from discord.ext import commands
+from database import connect_db
 
-USER_FILE = "users.json"
-
-Coins ="<:coin:1521927683439595730>"
+Coins = "<:coin:1521927683439595730>"
 Gems = "<a:diamond:1522083613657665606>"
 Trophies = "<:trophy:1522081868445388830>"
 Balance_header = "<a:points_1:1522084496223240213>"
@@ -15,21 +13,35 @@ def setup_balance(bot):
     @bot.command(name="balance", aliases=["bal"])
     async def balance(ctx):
 
-        try:
-            with open(USER_FILE, "r") as f:
-                users = json.load(f)
-        except:
-            users = {}
-
         user_id = str(ctx.author.id)
 
-        if user_id not in users:
+        conn = connect_db()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT coins, gems, trophies
+                FROM users
+                WHERE user_id = ?
+                """,
+                (user_id,)
+            )
+            user = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if user is None:
             await ctx.send("❌ Use `g!debut` first.")
             return
 
-        user = users[user_id]
+        coins = user["coins"] or 0
+        gems = user["gems"] or 0
+        trophies = user["trophies"] or 0
 
-        embed = discord.Embed(title=f"{Balance_header}{ctx.author.display_name}'s Balance", color=0*00000)
+        embed = discord.Embed(
+            title=f"{Balance_header} {ctx.author.display_name}'s Balance",
+            color=discord.Color.gold()
+        )
 
         embed.set_author(
             name=ctx.author.display_name,
@@ -37,20 +49,20 @@ def setup_balance(bot):
         )
 
         embed.add_field(
-            name= f"{Coins} Coins",
-            value=f"**{user['coins']:,}**",
+            name=f"{Coins} Coins",
+            value=f"**{coins:,}**",
             inline=True
         )
 
         embed.add_field(
-            name= f"{Gems} Gems",
-            value=f"**{user['gems']:,}**",
+            name=f"{Gems} Gems",
+            value=f"**{gems:,}**",
             inline=True
         )
 
         embed.add_field(
-            name= f"{Trophies} Trophies",
-            value=f"**{user['trophies']:,}**",
+            name=f"{Trophies} Trophies",
+            value=f"**{trophies:,}**",
             inline=True
         )
 
