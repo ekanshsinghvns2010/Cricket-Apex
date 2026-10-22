@@ -1,19 +1,11 @@
-
 import random
 import json
 import discord
 from discord.ext import commands
 
 from database import connect_db
-from utils.match_utils import (
-    load_matches,
-    save_matches,
-    find_player_match
-)
-from views.matches_lobby import (
-    build_lobby_embed,
-    MatchLobbyView
-)
+from utils.match_utils import load_matches, save_matches, find_player_match
+from views.matches_lobby import build_lobby_embed, MatchLobbyView
 from utils.countdown import start_countdown
 from utils.logger import log_action
 
@@ -82,6 +74,7 @@ def setup_dev(bot):
 
         try:
             team_size = int(match["team_size"])
+
             match.setdefault("red_team", [])
             match.setdefault("blue_team", [])
             match.setdefault("red_bots", [])
@@ -103,7 +96,7 @@ def setup_dev(bot):
                 "All-Rounder"
             ]
 
-            # Fill Red Team to its required size.
+            # Fill Red Team without exceeding the team size.
             while (
                 len(match["red_team"]) + len(match["red_bots"])
                 < team_size
@@ -113,7 +106,7 @@ def setup_dev(bot):
                     "role": random.choice(bot_roles)
                 })
 
-            # Fill Blue Team to its required size.
+            # Fill Blue Team without exceeding the team size.
             while (
                 len(match["blue_team"]) + len(match["blue_bots"])
                 < team_size
@@ -130,8 +123,8 @@ def setup_dev(bot):
 
             if not channel_id or not message_id:
                 await ctx.send(
-                    "❌ The match has no saved lobby message. "
-                    "Create a fresh lobby with g!play."
+                    "❌ The lobby message is not saved correctly. "
+                    "Please create a fresh lobby using g!play."
                 )
                 return
 
@@ -140,10 +133,7 @@ def setup_dev(bot):
             if channel is None:
                 channel = await bot.fetch_channel(int(channel_id))
 
-            message = await channel.fetch_message(int(message_id))
-
-            # Refresh the existing lobby message.
-            embed = await build_lobby_embed(ctx.guild, match_id)
+            lobby_message = await channel.fetch_message(int(message_id))
 
             red_total = (
                 len(match["red_team"]) + len(match["red_bots"])
@@ -153,45 +143,50 @@ def setup_dev(bot):
             )
 
             both_full = (
-                red_total >= team_size and blue_total >= team_size
+                red_total >= team_size
+                and blue_total >= team_size
             )
 
-            if both_full:
-                match["status"] = "starting"
-                save_matches(matches)
+            if not both_full:
+                embed = await build_lobby_embed(ctx.guild, match_id)
 
-                await ctx.send(
-                    f"✅ Teams filled!\n"
-                    f"🔴 Red: {red_total}/{team_size}\n"
-                    f"🔵 Blue: {blue_total}/{team_size}\n"
-                    f"⏳ Starting countdown..."
-                )
-
-                # Countdown function updates the lobby and toss screen.
-                await start_countdown(message, match_id)
-
-            else:
-                await message.edit(
+                await lobby_message.edit(
                     embed=embed,
                     view=MatchLobbyView(match_id)
                 )
+
                 await ctx.send(
-                    f"⚠️ Lobby refreshed, but teams are not full.\n"
+                    "⚠️ Lobby refreshed, but teams are not full.\n"
                     f"🔴 Red: {red_total}/{team_size}\n"
                     f"🔵 Blue: {blue_total}/{team_size}"
                 )
+                return
+
+            await ctx.send(
+                "✅ Teams filled!\n"
+                f"🔴 Red: {red_total}/{team_size}\n"
+                f"🔵 Blue: {blue_total}/{team_size}\n"
+                "⏳ Starting five-second countdown..."
+            )
+
+            # The countdown function handles the status transition.
+            await start_countdown(lobby_message, match_id)
 
         except discord.NotFound:
             await ctx.send(
                 "❌ The lobby message or channel could not be found. "
-                "Create a fresh lobby with g!play."
+                "Please create a fresh lobby using g!play."
             )
+
         except discord.Forbidden:
             await ctx.send(
                 "❌ I don't have permission to read or edit the lobby message."
             )
+
         except Exception as error:
-            print(f"g!fill failed: {type(error).__name__}: {error}")
+            print(
+                f"g!fill failed: {type(error).__name__}: {error}"
+            )
             await ctx.send(
                 f"❌ Fill failed: {type(error).__name__}: {error}"
             )
@@ -224,6 +219,7 @@ def setup_dev(bot):
                 "coins", "gems", "common",
                 "rare", "epic", "legendary"
             ]
+
             item = item.lower()
 
             if item not in valid_items:
@@ -237,11 +233,13 @@ def setup_dev(bot):
                     "UPDATE users SET coins = coins + ? WHERE user_id=?",
                     (amount, str(member.id))
                 )
+
             elif item == "gems":
                 cursor.execute(
                     "UPDATE users SET gems = gems + ? WHERE user_id=?",
                     (amount, str(member.id))
                 )
+
             else:
                 crates = json.loads(user["crates"])
                 crates[item] = crates.get(item, 0) + amount
