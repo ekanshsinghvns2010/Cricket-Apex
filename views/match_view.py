@@ -11,25 +11,24 @@ from utils.match_engine import (
 from utils.match_utils import load_matches, save_matches
 
 
-def get_player_id(player):
+def player_id(player):
     if isinstance(player, dict):
-        return str(player.get("id", player.get("player_id", "")))
-    return str(player) if player is not None else ""
+        return str(player.get("id") or player.get("player_id") or "")
+    return str(player or "")
 
 
-def get_player_name(player):
+def player_name(player):
     if isinstance(player, dict):
         return player.get("display_name") or player.get("name") or "Unknown"
-    return str(player) if player is not None else "Not selected"
+    return str(player or "Not selected")
 
 
-def get_player(match, player_id):
-    """Find a player in either team's confirmed XI."""
-    player_id = get_player_id(player_id)
+def find_player(match, value):
+    value = player_id(value)
 
     for team in ("red", "blue"):
         for player in match.get(f"{team}_xi", []):
-            if get_player_id(player) == player_id:
+            if player_id(player) == value:
                 return player
 
     return None
@@ -45,156 +44,92 @@ def build_match_embed(match_id):
             color=discord.Color.red(),
         )
 
-    batting_team = match.get("batting_team", "red")
-    bowling_team = match.get("bowling_team", "blue")
-
-    batting_name = match.get(
-        f"{batting_team}_name", batting_team.title()
-    )
-    bowling_name = match.get(
-        f"{bowling_team}_name", bowling_team.title()
-    )
-
+    batting = match.get("batting_team", "red")
+    bowling = match.get("bowling_team", "blue")
     runs = int(match.get("runs", 0))
     wickets = int(match.get("wickets", 0))
     overs = int(match.get("overs_completed", 0))
-    balls = int(match.get("balls_in_over", match.get("balls", 0)))
+    balls = int(match.get("balls_in_over", 0))
 
     embed = discord.Embed(
         title="🏏 Cricket Apex — Match Centre",
-        description=f"**{batting_name}** vs **{bowling_name}**",
+        description=(
+            f"**{match.get(f'{batting}_name', batting.title())}** "
+            "batting\n"
+            f"vs **{match.get(f'{bowling}_name', bowling.title())}**"
+        ),
         color=discord.Color.green(),
     )
 
-    embed.add_field(
-        name="Score",
-        value=f"**{runs}/{wickets}**",
-        inline=True,
-    )
+    embed.add_field(name="Score", value=f"**{runs}/{wickets}**")
     embed.add_field(
         name="Overs",
         value=f"{overs}.{balls} / {match.get('overs', 20)}",
-        inline=True,
+    )
+    embed.add_field(name="Innings", value=str(match.get("innings", 1)))
+    embed.add_field(name="Striker", value=player_name(match.get("striker")))
+    embed.add_field(
+        name="Non-striker",
+        value=player_name(match.get("non_striker")),
     )
     embed.add_field(
-        name="Innings",
-        value=str(match.get("innings", 1)),
-        inline=True,
+        name="Bowler",
+        value=player_name(match.get("current_bowler")),
     )
-    embed.add_field(
-        name="🏏 Striker",
-        value=get_player_name(match.get("striker")),
-        inline=True,
-    )
-    embed.add_field(
-        name="🏏 Non-striker",
-        value=get_player_name(match.get("non_striker")),
-        inline=True,
-    )
-    embed.add_field(
-        name="🎯 Bowler",
-        value=get_player_name(match.get("current_bowler")),
-        inline=True,
-    )
-
-    if match.get("target") is not None:
-        embed.add_field(
-            name="Target",
-            value=str(match["target"]),
-            inline=True,
-        )
-
     embed.add_field(
         name="Status",
         value=str(match.get("status", "unknown")).replace("_", " ").title(),
-        inline=True,
+        inline=False,
     )
+
+    if match.get("target") is not None:
+        embed.add_field(name="Target", value=str(match["target"]))
+
+    if match.get("last_delivery"):
+        embed.add_field(
+            name="Last delivery",
+            value=str(match["last_delivery"])[:1024],
+            inline=False,
+        )
 
     return embed
 
 
-class MatchView(discord.ui.View):
-    """Interactive delivery controls for a live innings."""
-
-    def __init__(self, match_id):
-        super().__init__(timeout=None)
-        self.match_id = str(match_id)
-
-        matches = load_matches()
-        match = matches.get(self.match_id, {})
-
-        self.add_item(DeliverySelect(self.match_id, "variation"))
-
-        # Shot and intent are chosen by the batting captain.
-        self.add_item(DeliverySelect(self.match_id, "shot"))
-        self.add_item(DeliverySelect(self.match_id, "intent"))
-        self.add_item(DeliverySelect(self.match_id, "length"))
-
-        self.add_item(SubmitDeliveryButton(self.match_id))
-
-    async def refresh(self, interaction):
-        matches = load_matches()
-        match = matches.get(self.match_id)
-
-        if not match:
-            await interaction.followup.send(
-                "This match could not be found.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.message.edit(
-            embed=build_match_embed(self.match_id),
-            view=MatchView(self.match_id),
-        )
-
-
 class DeliverySelect(discord.ui.Select):
-    def __init__(self, match_id, selection_type):
+    def __init__(self, match_id, kind):
         self.match_id = str(match_id)
-        self.selection_type = selection_type
+        self.kind = kind
 
-        matches = load_matches()
-        match = matches.get(self.match_id, {})
+        match = load_matches().get(self.match_id, {})
+        bowler = find_player(match, match.get("current_bowler")) or {}
 
-        bowler = get_player(
-            match, match.get("current_bowler")
-        ) or {}
-
-        if selection_type == "variation":
-            options = [
-                discord.SelectOption(label=value)
-                for value in bowling_variations(bowler)
-            ]
+        if kind == "variation":
+            values = bowling_variations(bowler)
             placeholder = "Bowling captain: choose variation"
-
-        elif selection_type == "shot":
-            options = [
-                discord.SelectOption(label=value)
-                for value in BATTING_SHOTS
-            ]
+        elif kind == "shot":
+            values = BATTING_SHOTS
             placeholder = "Batting captain: choose shot"
-
-        elif selection_type == "intent":
-            options = [
-                discord.SelectOption(label=value)
-                for value in BATTING_INTENTS
-            ]
+        elif kind == "intent":
+            values = BATTING_INTENTS
             placeholder = "Batting captain: choose intent"
-
         else:
-            options = [
-                discord.SelectOption(label=value)
-                for value in BOWLING_LENGTHS
-            ]
+            values = BOWLING_LENGTHS
             placeholder = "Bowling captain: choose length"
+
+        options = [
+            discord.SelectOption(label=str(value)[:100], value=str(value))
+            for value in list(values)[:25]
+        ]
+
+        if not options:
+            options = [discord.SelectOption(label="Unavailable", value="Unavailable")]
 
         super().__init__(
             placeholder=placeholder,
             min_values=1,
             max_values=1,
-            options=options[:25],
-            custom_id=f"match_{selection_type}_{self.match_id}",
+            options=options,
+            custom_id=f"apex:{self.match_id}:{kind}",
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -203,36 +138,28 @@ class DeliverySelect(discord.ui.Select):
 
         if not match or match.get("status") != "live":
             await interaction.response.send_message(
-                "This match is not live.",
+                "The match is not ready for a delivery.",
                 ephemeral=True,
             )
             return
 
-        batting_team = match.get("batting_team", "red")
-        bowling_team = match.get("bowling_team", "blue")
+        batting = match.get("batting_team", "red")
+        bowling = match.get("bowling_team", "blue")
+        captain_team = batting if self.kind in ("shot", "intent") else bowling
+        captain = str(match.get(f"{captain_team}_captain") or "")
 
-        if self.selection_type in ("shot", "intent"):
-            captain = match.get(f"{batting_team}_captain")
-            label = "batting"
-        else:
-            captain = match.get(f"{bowling_team}_captain")
-            label = "bowling"
-
-        if str(interaction.user.id) != str(captain):
+        if str(interaction.user.id) != captain:
             await interaction.response.send_message(
-                f"Only the {label} captain can change this selection.",
+                f"Only the {captain_team} team's captain can change this option.",
                 ephemeral=True,
             )
             return
 
-        match.setdefault("delivery_choices", {})[
-            self.selection_type
-        ] = self.values[0]
-
+        match.setdefault("delivery_choices", {})[self.kind] = self.values[0]
         save_matches(matches)
 
         await interaction.response.send_message(
-            f"Selected: **{self.values[0]}**",
+            f"Selected **{self.values[0]}**.",
             ephemeral=True,
         )
 
@@ -240,11 +167,10 @@ class DeliverySelect(discord.ui.Select):
 class SubmitDeliveryButton(discord.ui.Button):
     def __init__(self, match_id):
         self.match_id = str(match_id)
-
         super().__init__(
             label="Deliver Ball",
             style=discord.ButtonStyle.success,
-            custom_id=f"match_deliver_{self.match_id}",
+            custom_id=f"apex:{self.match_id}:deliver",
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -253,50 +179,44 @@ class SubmitDeliveryButton(discord.ui.Button):
 
         if not match or match.get("status") != "live":
             await interaction.response.send_message(
-                "This match is not live.",
+                "The match is not live.",
                 ephemeral=True,
             )
             return
 
-        batting_team = match.get("batting_team", "red")
-        bowling_team = match.get("bowling_team", "blue")
+        batting = match.get("batting_team", "red")
+        bowling = match.get("bowling_team", "blue")
+        allowed = {
+            str(match.get(f"{batting}_captain") or ""),
+            str(match.get(f"{bowling}_captain") or ""),
+        }
 
-        batting_captain = match.get(f"{batting_team}_captain")
-        bowling_captain = match.get(f"{bowling_team}_captain")
-
-        if str(interaction.user.id) not in {
-            str(batting_captain),
-            str(bowling_captain),
-        }:
+        if str(interaction.user.id) not in allowed:
             await interaction.response.send_message(
-                "Only either team's captain can submit a delivery.",
+                "Only a team captain can submit a delivery.",
                 ephemeral=True,
             )
             return
 
         choices = match.get("delivery_choices", {})
-
         required = ("variation", "shot", "intent", "length")
         missing = [key for key in required if not choices.get(key)]
 
         if missing:
             await interaction.response.send_message(
-                "Choose all delivery options first: "
-                + ", ".join(missing),
+                "Choose all options first: " + ", ".join(missing),
                 ephemeral=True,
             )
             return
 
-        batter_id = match.get("striker")
-        bowler_id = match.get("current_bowler")
-
-        batter = get_player(match, batter_id)
-        bowler = get_player(match, bowler_id)
+        batter_ref = match.get("striker")
+        bowler_ref = match.get("current_bowler")
+        batter = find_player(match, batter_ref)
+        bowler = find_player(match, bowler_ref)
 
         if not batter or not bowler:
             await interaction.response.send_message(
-                "The striker or bowler is missing from the playing XI. "
-                "Complete opening selection first.",
+                "The striker or bowler is missing. Check opening selection.",
                 ephemeral=True,
             )
             return
@@ -312,75 +232,107 @@ class SubmitDeliveryButton(discord.ui.Button):
         )
 
         runs = int(result.get("runs", 0))
-        match["runs"] = int(match.get("runs", 0)) + runs
-
-        extras = match.setdefault("extras", {})
-        extra_type = result.get("extra")
-
-        if extra_type:
-            extras[extra_type] = int(extras.get(extra_type, 0)) + runs
-
-        if result.get("wicket"):
-            match["wickets"] = int(match.get("wickets", 0)) + 1
-
-            dismissed = match.setdefault("dismissed_players", [])
-            dismissed.append(batter_id)
-
-            # Clear striker so the next-batter selection must happen.
-            match["striker"] = None
-            match["status"] = "batter_selection"
-
+        wicket = bool(result.get("wicket"))
         legal = bool(result.get("legal", True))
 
+        match["runs"] = int(match.get("runs", 0)) + runs
+
+        extra_type = result.get("extra")
+        if extra_type:
+            extras = match.setdefault("extras", {})
+            extras[extra_type] = int(extras.get(extra_type, 0)) + runs
+
+        # Track who has faced a delivery so dismissed batters cannot return.
+        faced = match.setdefault("batted_players", [])
+        striker_id = player_id(batter_ref)
+        if striker_id and striker_id not in faced:
+            faced.append(striker_id)
+
+        if wicket:
+            match["wickets"] = int(match.get("wickets", 0)) + 1
+            dismissed = match.setdefault("dismissed_players", [])
+            if striker_id not in [player_id(p) for p in dismissed]:
+                dismissed.append(striker_id)
+
+            match["dismissed_slot"] = "striker"
+            match["striker"] = None
+
+        total_balls = (
+            int(match.get("overs_completed", 0)) * 6
+            + int(match.get("balls_in_over", 0))
+        )
+
         if legal:
-            total_balls = (
-                int(match.get("overs_completed", 0)) * 6
-                + int(match.get("balls_in_over", 0))
-                + 1
+            total_balls += 1
+
+        match["overs_completed"] = total_balls // 6
+        match["balls_in_over"] = total_balls % 6
+
+        # Rotate strike on odd runs. On a wicket, the incoming batter
+        # takes the vacant striker position.
+        if runs % 2 == 1 and not wicket:
+            match["striker"], match["non_striker"] = (
+                match.get("non_striker"),
+                match.get("striker"),
             )
 
-            match["overs_completed"] = total_balls // 6
-            match["balls_in_over"] = total_balls % 6
+        over_finished = legal and total_balls > 0 and total_balls % 6 == 0
 
-            # Swap ends after an odd number of runs, except on a wicket
-            # where the incoming batter selection handles the striker.
-            if runs % 2 == 1 and not result.get("wicket"):
-                match["striker"], match["non_striker"] = (
-                    match.get("non_striker"),
-                    match.get("striker"),
-                )
-
-            # Swap ends at the end of a completed over.
-            if total_balls % 6 == 0 and not result.get("wicket"):
-                match["striker"], match["non_striker"] = (
-                    match.get("non_striker"),
-                    match.get("striker"),
-                )
-                match["previous_bowler"] = bowler_id
-                match["status"] = "bowler_selection"
+        if over_finished:
+            # End-of-over strike rotation.
+            match["striker"], match["non_striker"] = (
+                match.get("non_striker"),
+                match.get("striker"),
+            )
+            match["previous_bowler"] = bowler_ref
 
         match["last_delivery"] = result.get("description", "Delivery complete.")
         match["delivery_choices"] = {}
 
         overs_limit = int(match.get("overs", 20))
-        innings_over = (
-            int(match.get("overs_completed", 0)) >= overs_limit
-        )
         all_out = int(match.get("wickets", 0)) >= 10
+        innings_over = int(match.get("overs_completed", 0)) >= overs_limit
 
-        if innings_over or all_out:
+        if match.get("target") is not None and int(match["runs"]) >= int(match["target"]):
+            match["status"] = "match_over"
+        elif all_out or innings_over:
             match["status"] = "innings_break"
+        elif wicket:
+            match["status"] = "batter_selection"
+        elif over_finished:
+            match["status"] = "bowler_selection"
+        else:
+            match["status"] = "live"
 
         save_matches(matches)
 
         await interaction.response.edit_message(
             embed=build_match_embed(self.match_id),
-            view=MatchView(self.match_id)
-            if match.get("status") == "live"
-            else None,
+            view=MatchView(self.match_id) if match["status"] == "live" else None,
         )
 
         await interaction.followup.send(
-            f"**{result.get('description', 'Delivery complete.')}**",
+            f"🏏 {match['last_delivery']}",
             ephemeral=False,
         )
+
+        # Post the next required stage in the same channel.
+        if match["status"] == "batter_selection":
+            from views.next_batter import send_next_batter_selection
+            await send_next_batter_selection(interaction.channel, self.match_id)
+
+        elif match["status"] == "bowler_selection":
+            from views.over_selection import send_next_bowler_selection
+            await send_next_bowler_selection(interaction.channel, self.match_id)
+
+
+class MatchView(discord.ui.View):
+    def __init__(self, match_id):
+        super().__init__(timeout=None)
+        self.match_id = str(match_id)
+
+        self.add_item(DeliverySelect(self.match_id, "variation"))
+        self.add_item(DeliverySelect(self.match_id, "shot"))
+        self.add_item(DeliverySelect(self.match_id, "intent"))
+        self.add_item(DeliverySelect(self.match_id, "length"))
+        self.add_item(SubmitDeliveryButton(self.match_id))
