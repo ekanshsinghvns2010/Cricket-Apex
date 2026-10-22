@@ -7,12 +7,12 @@ from utils.match_utils import load_matches, save_matches
 
 
 def get_owned_cards(user_id):
-    """Return the actual player cards owned by a user."""
+    """Return player cards actually owned by this user."""
     conn = connect_db()
     try:
         user = conn.execute(
             "SELECT cards FROM users WHERE user_id = ?",
-            (str(user_id),)
+            (str(user_id),),
         ).fetchone()
 
         if not user:
@@ -21,9 +21,6 @@ def get_owned_cards(user_id):
         try:
             card_ids = json.loads(user["cards"] or "[]")
         except (json.JSONDecodeError, TypeError):
-            return []
-
-        if not card_ids:
             return []
 
         players = []
@@ -36,7 +33,7 @@ def get_owned_cards(user_id):
                 FROM players
                 WHERE id = ?
                 """,
-                (str(card_id),)
+                (str(card_id),),
             ).fetchone()
 
             if player:
@@ -48,11 +45,15 @@ def get_owned_cards(user_id):
 
 
 def contribution_counts(team_size):
-    """Distribute 11 cards fairly across the human team."""
-    base, extra = divmod(11, int(team_size))
+    """Split 11 required cards as evenly as possible."""
+    team_size = int(team_size)
+    if not 1 <= team_size <= 11:
+        raise ValueError("Team size must be between 1 and 11.")
+
+    base, extra = divmod(11, team_size)
     return [
-        base + (1 if i < extra else 0)
-        for i in range(int(team_size))
+        base + (1 if index < extra else 0)
+        for index in range(team_size)
     ]
 
 
@@ -68,21 +69,55 @@ def selected_xi(match, team):
     return match.setdefault(f"{team}_xi", [])
 
 
-def build_selection_embed(match, team):
-    members = get_team(match, team)
-    captain = get_captain(match, team)
-    counts = contribution_counts(match["team_size"])
+def team_selection_complete(match, team):
+    """Check that every teammate submitted their assigned cards."""
+    members = [str(x) for x in get_team(match, team)]
+    if not members:
+        return False
 
-    lines = [
-        f"**{i + 1}.** <@{user_id}> — "
-        f"{len(next((x['cards'] for x in match.get('card_selections', [])
-                    if x['user_id'] == str(user_id)), []))}/{counts[i]} cards"
-        for i, user_id in enumerate(members)
-    ]
+    counts = contribution_counts(match["team_size"])
+    selections = match.get("card_selections", [])
+
+    for index, member_id in enumerate(members):
+        selection = next(
+            (
+                item for item in selections
+                if item.get("user_id") == member_id
+                and item.get("team") == team
+            ),
+            None,
+        )
+        if not selection or len(selection.get("cards", [])) != counts[index]:
+            return False
 
     xi = selected_xi(match, team)
-    lines.append("")
-    lines.append(f"**Squad cards selected: {len(xi)}/11**")
+    ids = [str(player.get("id")) for player in xi if isinstance(player, dict)]
+    return len(xi) == 11 and len(ids) == 11 and len(set(ids)) == 11
+
+
+def build_selection_embed(match, team):
+    members = get_team(match, team)
+    counts = contribution_counts(match["team_size"])
+    selections = match.get("card_selections", [])
+    lines = []
+
+    for index, member_id in enumerate(members):
+        selection = next(
+            (
+                item for item in selections
+                if item.get("user_id") == str(member_id)
+                and item.get("team") == team
+            ),
+            None,
+        )
+        amount = len(selection.get("cards", [])) if selection else 0
+        lines.append(
+            f"**{index + 1}.** <@{member_id}> — "
+            f"{amount}/{counts[index]} cards"
+        )
+
+    xi = selected_xi(match, team)
+    lines.extend(["", f"**Selected squad: {len(xi)}/11**"])
 
     for index, player in enumerate(xi, 1):
         lines.append(
@@ -91,29 +126,65 @@ def build_selection_embed(match, team):
         )
 
     embed = discord.Embed(
-        title=f"🏏 {team.upper()} TEAM — PLAYER SELECTION",
+        title=f"🏏 {team.title()} Team — Player Selection",
         description="\n".join(lines)[:4000],
-        color=discord.Color.red() if team == "red" else discord.Color.blue()
+        color=discord.Color.red() if team == "red" else discord.Color.blue(),
     )
+    captain = get_captain(match, team)
     embed.add_field(
         name="Captain",
         value=f"<@{captain}>" if captain else "Not assigned",
-        inline=True
+        inline=True,
     )
-    embed.add_field(
-        name="Squad",
-        value=f"{len(xi)}/11",
-        inline=True
-    )
+    embed.add_field(name="Squad", value=f"{len(xi)}/11", inline=True)
     embed.set_footer(
-        text="Each teammate must select their assigned number of cards."
+        text="Each teammate must submit their assigned number of unique cards."
     )
     return embed
 
 
-class CardPicker(discord.ui.View):
-    """A teammate chooses owned cards for their team's squad."""
+async def post_xi_confirmation(channel, match_id):
+    """Post both captain confirmation messages once both XIs are complete."""
+    from views.xi_confirmation import send_xi_confirmation
 
+    matches = load_matches()
+    match = matches.get(str(match_id))
+    if not match:
+        return
+
+    if not (
+        team_selection_complete(match, "red")
+        and team_selection_complete(match, "blue")
+    ):
+        return
+
+    # Avoid duplicate confirmation messages if callbacks arrive together.
+    if match.get("xi_confirmation_posted"):
+        return
+
+    match["status"] = "xi_confirmation"
+    match["state"] = "XI_CONFIRMATION"
+    match["xi_confirmation_posted"] = True
+    match["xi_confirmed"] = {"red": False, "blue": False}
+    save_matches(matches)
+
+    try:
+        await send_xi_confirmation(channel, match_id, "red")
+        await send_xi_confirmation(channel, match_id, "blue")
+        await channel.send(
+            "✅ Both squads are complete. Each captain must confirm their XI."
+        )
+    except Exception:
+        # Allow retry if posting fails.
+        matches = load_matches()
+        match = matches.get(str(match_id))
+        if match:
+            match["xi_confirmation_posted"] = False
+            save_matches(matches)
+        raise
+
+
+class CardPicker(discord.ui.View):
     def __init__(self, match_id, team, user_id):
         super().__init__(timeout=300)
         self.match_id = str(match_id)
@@ -122,65 +193,65 @@ class CardPicker(discord.ui.View):
 
         matches = load_matches()
         match = matches.get(self.match_id)
-        if not match:
+        if not match or team not in ("red", "blue"):
             return
 
-        members = get_team(match, team)
-        if self.user_id not in [str(x) for x in members]:
+        members = [str(x) for x in get_team(match, team)]
+        if self.user_id not in members:
             return
 
         counts = contribution_counts(match["team_size"])
-        member_index = [str(x) for x in members].index(self.user_id)
-        self.required = counts[member_index]
+        self.required = counts[members.index(self.user_id)]
 
         existing = next(
             (
-                item["cards"]
+                item.get("cards", [])
                 for item in match.get("card_selections", [])
-                if item["user_id"] == self.user_id
-                and item["team"] == team
+                if item.get("user_id") == self.user_id
+                and item.get("team") == team
             ),
-            []
+            [],
         )
-        self.existing = existing
 
         owned = get_owned_cards(self.user_id)
         options = []
 
         for player in owned[:25]:
+            card_id = str(player["id"])
             label = (
                 player.get("display_name")
                 or player.get("name")
-                or str(player["id"])
+                or card_id
             )[:100]
-            role = str(player.get("role") or "Player")
-            rating = player.get("ovr") or 0
-
             options.append(
                 discord.SelectOption(
                     label=label,
-                    value=str(player["id"]),
-                    description=f"{role} • OVR {rating}"[:100],
-                    default=str(player["id"]) in existing
+                    value=card_id,
+                    description=(
+                        f"{player.get('role') or 'Player'} · "
+                        f"OVR {player.get('ovr') or 0}"
+                    )[:100],
+                    default=card_id in existing,
                 )
             )
 
-        if options:
+        self.card_select = None
+        if len(options) >= self.required:
             self.card_select = discord.ui.Select(
-                placeholder=f"Choose {self.required} player card(s)",
+                placeholder=f"Choose exactly {self.required} cards",
                 min_values=self.required,
                 max_values=self.required,
-                options=options
+                options=options,
             )
             self.card_select.callback = self.save_selection
             self.add_item(self.card_select)
 
-        save_button = discord.ui.Button(
+        button = discord.ui.Button(
             label="Save my cards",
-            style=discord.ButtonStyle.success
+            style=discord.ButtonStyle.success,
         )
-        save_button.callback = self.save_button
-        self.add_item(save_button)
+        button.callback = self.save_button
+        self.add_item(button)
 
     async def save_selection(self, interaction):
         await interaction.response.defer(ephemeral=True)
@@ -188,47 +259,43 @@ class CardPicker(discord.ui.View):
     async def save_button(self, interaction):
         if str(interaction.user.id) != self.user_id:
             await interaction.response.send_message(
-                "This card picker belongs to another player.",
-                ephemeral=True
+                "This picker belongs to another player.",
+                ephemeral=True,
             )
             return
 
-        if not hasattr(self, "card_select"):
+        if self.card_select is None:
             await interaction.response.send_message(
-                "You don't have any available player cards.",
-                ephemeral=True
+                f"You need at least {self.required} available owned cards.",
+                ephemeral=True,
             )
             return
 
         chosen_ids = list(self.card_select.values)
-
         if len(chosen_ids) != self.required:
             await interaction.response.send_message(
-                f"Select exactly {self.required} cards.",
-                ephemeral=True
+                f"Select exactly {self.required} cards first.",
+                ephemeral=True,
             )
             return
 
-        # Verify all selected IDs are still owned.
         owned = {
             str(player["id"]): player
             for player in get_owned_cards(self.user_id)
         }
-
         if any(card_id not in owned for card_id in chosen_ids):
             await interaction.response.send_message(
-                "One or more selected cards are no longer owned by you.",
-                ephemeral=True
+                "One or more cards are no longer owned by you.",
+                ephemeral=True,
             )
             return
 
         matches = load_matches()
         match = matches.get(self.match_id)
-
-        if not match or match.get("status") not in ("toss", "selecting"):
+        if not match or match.get("status") != "selecting":
             await interaction.response.send_message(
-                "This match is not accepting card selections.",
-                ephemeral=True
+                "Card selection is closed for this match.",
+                ephemeral=True,
             )
             return
 
@@ -237,49 +304,54 @@ class CardPicker(discord.ui.View):
         ]:
             await interaction.response.send_message(
                 "You are no longer on this team.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
         selections = match.setdefault("card_selections", [])
 
-        # Replace this teammate's previous selection.
+        # Remove this teammate's old selection before checking conflicts.
         selections[:] = [
             item for item in selections
             if not (
-                item["user_id"] == self.user_id
-                and item["team"] == self.team
+                item.get("user_id") == self.user_id
+                and item.get("team") == self.team
             )
         ]
 
-        # Prevent duplicate player IDs within the same team.
-        other_team_cards = {
-            str(card["id"])
+        assigned_ids = {
+            str(card_id)
             for item in selections
-            if item["team"] == self.team
-            for card in item.get("cards", [])
+            if item.get("team") == self.team
+            for card_id in item.get("cards", [])
         }
 
-        if any(card_id in other_team_cards for card_id in chosen_ids):
+        if len(set(chosen_ids)) != len(chosen_ids):
+            await interaction.response.send_message(
+                "You cannot select the same card twice.",
+                ephemeral=True,
+            )
+            return
+
+        if any(card_id in assigned_ids for card_id in chosen_ids):
             await interaction.response.send_message(
                 "A selected card is already assigned to a teammate. "
                 "Choose different cards.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
         selections.append({
             "user_id": self.user_id,
             "team": self.team,
-            "cards": chosen_ids
+            "cards": chosen_ids,
         })
 
-        # Rebuild the team's XI from all teammate selections.
         xi = []
         for item in selections:
-            if item["team"] != self.team:
+            if item.get("team") != self.team:
                 continue
-            for card_id in item["cards"]:
+            for card_id in item.get("cards", []):
                 player = owned.get(str(card_id))
                 if player:
                     xi.append(player)
@@ -288,15 +360,20 @@ class CardPicker(discord.ui.View):
         save_matches(matches)
 
         await interaction.response.send_message(
-            f"Saved {len(chosen_ids)} card(s). "
-            f"Your team has selected {len(xi)}/11 cards.",
-            ephemeral=True
+            f"Saved {len(chosen_ids)} cards. "
+            f"Your team currently has {len(xi)}/11 players.",
+            ephemeral=True,
         )
+
+        if (
+            team_selection_complete(match, self.team)
+            and team_selection_complete(match, "red")
+            and team_selection_complete(match, "blue")
+        ):
+            await post_xi_confirmation(interaction.channel, self.match_id)
 
 
 class PlayerSelectionView(discord.ui.View):
-    """Team members open their own card picker."""
-
     def __init__(self, match_id, team):
         super().__init__(timeout=600)
         self.match_id = str(match_id)
@@ -308,7 +385,7 @@ class PlayerSelectionView(discord.ui.View):
                 discord.ButtonStyle.danger
                 if team == "red"
                 else discord.ButtonStyle.primary
-            )
+            ),
         )
         button.callback = self.open_picker
         self.add_item(button)
@@ -320,7 +397,14 @@ class PlayerSelectionView(discord.ui.View):
         if not match:
             await interaction.response.send_message(
                 "Match not found.",
-                ephemeral=True
+                ephemeral=True,
+            )
+            return
+
+        if match.get("status") != "selecting":
+            await interaction.response.send_message(
+                "Player selection is not open.",
+                ephemeral=True,
             )
             return
 
@@ -329,25 +413,25 @@ class PlayerSelectionView(discord.ui.View):
         ]:
             await interaction.response.send_message(
                 "You are not on this team.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
         picker = CardPicker(
             self.match_id,
             self.team,
-            interaction.user.id
+            interaction.user.id,
         )
 
-        if not any(isinstance(item, discord.ui.Select) for item in picker.children):
+        if picker.card_select is None:
             await interaction.response.send_message(
-                "You need enough owned cards to make your selection.",
-                ephemeral=True
+                "You do not have enough available owned cards for your allocation.",
+                ephemeral=True,
             )
             return
 
         await interaction.response.send_message(
             embed=build_selection_embed(match, self.team),
             view=picker,
-            ephemeral=True
+            ephemeral=True,
         )
