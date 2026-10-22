@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 
@@ -8,124 +7,122 @@ from utils.match_utils import load_matches, save_matches
 
 logger = logging.getLogger(__name__)
 
+# Prevent duplicate countdowns for the same match.
+_ACTIVE_COUNTDOWNS = set()
+
 
 async def start_countdown(message, match_id):
-    from views.matches_lobby import (
-        build_lobby_embed,
-        MatchLobbyView
-    )
+    from views.matches_lobby import MatchLobbyView, build_lobby_embed
     from views.toss_view import build_toss_embed
 
     match_id = str(match_id)
 
-    matches = load_matches()
-    match = matches.get(match_id)
-
-    if match is None:
-        logger.error("Countdown stopped: match %s not found", match_id)
+    if match_id in _ACTIVE_COUNTDOWNS:
+        logger.info("Countdown already running for match %s", match_id)
         return
 
-    if match.get("status") == "toss":
-        logger.info("Match %s has already reached the toss", match_id)
-        return
-
-    if match.get("status") == "live":
-        logger.info("Match %s is already live", match_id)
-        return
-
-    match["status"] = "starting"
-    save_matches(matches)
-
-    guild = message.guild
-
-    if guild is None:
-        logger.error("Countdown stopped: message has no guild")
-        return
-
-    view = MatchLobbyView(match_id)
-    for child in view.children:
-        child.disabled = True
+    _ACTIVE_COUNTDOWNS.add(match_id)
 
     try:
+        matches = load_matches()
+        match = matches.get(match_id)
+
+        if match is None:
+            logger.error("Match %s was not found", match_id)
+            return
+
+        if match.get("status") in (
+            "toss", "live", "completed", "cancelled"
+        ):
+            logger.info(
+                "Match %s cannot start countdown; status=%s",
+                match_id,
+                match.get("status")
+            )
+            return
+
+        guild = message.guild
+        if guild is None:
+            logger.error("Lobby message has no guild")
+            return
+
+        match["status"] = "starting"
+        save_matches(matches)
+
+        view = MatchLobbyView(match_id)
+        for child in view.children:
+            child.disabled = True
+
         for seconds in (5, 4, 3, 2, 1):
+            matches = load_matches()
+            if match_id not in matches:
+                logger.error("Match %s disappeared during countdown", match_id)
+                return
+
             embed = await build_lobby_embed(guild, match_id)
 
-            # Find the Status field by name instead of relying
-            # on a hard-coded embed field index.
             status_index = next(
                 (
-                    index
-                    for index, field in enumerate(embed.fields)
+                    i for i, field in enumerate(embed.fields)
                     if field.name == "Status"
                 ),
                 None
             )
 
+            status_text = f"⏳ Match starts in **{seconds}**..."
+
             if status_index is None:
                 embed.add_field(
                     name="Status",
-                    value=f"⏳ Match starts in **{seconds}**...",
+                    value=status_text,
                     inline=False
                 )
             else:
                 embed.set_field_at(
                     status_index,
                     name="Status",
-                    value=f"⏳ Match starts in **{seconds}**...",
+                    value=status_text,
                     inline=False
                 )
 
             await message.edit(embed=embed, view=view)
-            logger.info(
-                "Match %s countdown: %s",
-                match_id,
-                seconds
-            )
+            logger.info("Match %s countdown: %s", match_id, seconds)
 
             await asyncio.sleep(1)
 
-        # Verify the match still exists before showing the toss.
         matches = load_matches()
-        match = matches.get(match_id)
-
-        if match is None:
+        if match_id not in matches:
             logger.error("Match %s disappeared before toss", match_id)
             return
 
-        # Build the toss result and update the existing lobby message.
+        # Generate the toss result.
         toss_embed = await build_toss_embed(guild, match_id)
 
         matches = load_matches()
         match = matches.get(match_id)
-
         if match is None:
-            logger.error("Match %s disappeared while building toss", match_id)
+            logger.error("Match %s disappeared while preparing toss", match_id)
             return
 
         match["status"] = "toss"
         save_matches(matches)
 
+        # Replace the lobby with the toss result.
         await message.edit(embed=toss_embed, view=None)
 
-        logger.info("Match %s toss screen displayed successfully", match_id)
+        logger.info("Match %s toss displayed successfully", match_id)
 
     except discord.NotFound:
-        logger.exception(
-            "Countdown failed: lobby message %s was not found",
-            match_id
-        )
+        logger.exception("Lobby message not found for match %s", match_id)
         raise
 
     except discord.Forbidden:
-        logger.exception(
-            "Countdown failed: bot lacks permission to edit lobby %s",
-            match_id
-        )
+        logger.exception("Missing permission to edit match %s lobby", match_id)
         raise
 
     except Exception:
-        logger.exception(
-            "Countdown or toss transition failed for match %s",
-            match_id
-        )
+        logger.exception("Countdown failed for match %s", match_id)
         raise
+
+    finally:
+        _ACTIVE_COUNTDOWNS.discard(match_id)
