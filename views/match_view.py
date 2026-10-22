@@ -1,420 +1,216 @@
 
+# utils/innings_flow.py
+
 import discord
 
 from utils.match_utils import load_matches, save_matches
-from utils.match_engine import (
-    bowling_variations,
-    BOWLING_LENGTHS,
-    BATTING_SHOTS,
-    BATTING_INTENTS,
-    delivery_result,
+from utils.match_state import (
+    get_player_id,
+    get_player_name,
+    validate_xi,
+    validate_opening_batters,
+    validate_bowler,
 )
 
 
-def get_match(match_id):
-    return load_matches().get(str(match_id))
+def get_match_or_raise(match_id):
+    matches = load_matches()
+    match = matches.get(str(match_id))
+
+    if match is None:
+        raise ValueError(f"Match {match_id} was not found.")
+
+    return matches, match
 
 
-def overs_text(balls):
-    balls = max(0, int(balls or 0))
-    return f"{balls // 6}.{balls % 6}"
+def save_current_match(match_id, match):
+    matches = load_matches()
+    matches[str(match_id)] = match
+    save_matches(matches)
 
 
-def team_label(team):
-    return "🔴 Red Team" if team == "red" else "🔵 Blue Team"
+def both_xis_confirmed(match):
+    confirmed = match.get("xi_confirmed", {})
+
+    return (
+        confirmed.get("team1", False)
+        and confirmed.get("team2", False)
+    )
 
 
-def build_match_embed(match_id):
-    match = get_match(match_id)
+def validate_match_setup(match):
+    if not both_xis_confirmed(match):
+        return False, "Both captains must confirm their playing XIs."
 
-    if not match:
-        return discord.Embed(
-            title="Match not found",
-            color=discord.Color.red(),
-        )
+    for team in ("team1", "team2"):
+        valid, reason = validate_xi(match, team)
+        if not valid:
+            return False, reason
+
+    return True, "Match setup valid."
+
+
+def validate_innings_start(match):
+    valid, reason = validate_match_setup(match)
+    if not valid:
+        return False, reason
+
+    valid, reason = validate_opening_batters(match)
+    if not valid:
+        return False, reason
+
+    valid, reason = validate_bowler(match)
+    if not valid:
+        return False, reason
+
+    return True, "Ready to start."
+
+
+def score_embed(match):
+    batting_team = match.get("batting_team", "team1")
+    bowling_team = match.get("bowling_team", "team2")
+
+    batting_name = match.get(
+        f"{batting_team}_name",
+        batting_team.replace("_", " ").title(),
+    )
+    bowling_name = match.get(
+        f"{bowling_team}_name",
+        bowling_team.replace("_", " ").title(),
+    )
 
     runs = int(match.get("runs", 0))
     wickets = int(match.get("wickets", 0))
-    balls = int(match.get("balls", 0))
-    overs_limit = int(
-        match.get("overs_limit", match.get("overs", 5))
-    )
-    target = match.get("target")
+    overs = int(match.get("overs", 0))
+    balls = int(match.get("balls_in_over", 0))
 
     embed = discord.Embed(
-        title="🏏 CRICKET APEX • LIVE MATCH",
-        description=(
-            f"**{team_label(match.get('batting_team', 'red'))} batting**\n"
-            f"## {runs}/{wickets}\n"
-            f"Overs: **{overs_text(balls)}/{overs_limit}.0**\n"
-            f"Target: **{target if target is not None else '—'}**"
-        ),
-        color=discord.Color.gold(),
+        title="🏏 Cricket Apex — Live Score",
+        description=f"**{batting_name}** vs **{bowling_name}**",
+        color=discord.Color.green(),
     )
-
-    batters = match.get("batters", [])
-
-    if batters:
-        lines = []
-
-        for index, player in enumerate(batters[:2]):
-            marker = "🏏" if index == 0 else "　"
-            name = player.get(
-                "display_name",
-                player.get("name", "Batter"),
-            )
-            lines.append(
-                f"{marker} **{name}** — "
-                f"{player.get('runs', 0)} "
-                f"({player.get('balls', 0)})"
-            )
-
-        embed.add_field(
-            name="BATTERS",
-            value="\n".join(lines),
-            inline=False,
-        )
-
-    bowler = match.get("current_bowler")
-
-    if bowler:
-        embed.add_field(
-            name="CURRENT BOWLER",
-            value=(
-                f"**{bowler.get('display_name', bowler.get('name', 'Bowler'))}**\n"
-                f"{bowler.get('wickets', 0)} wickets • "
-                f"{bowler.get('runs_conceded', 0)} runs"
-            ),
-            inline=False,
-        )
-
-    recent = match.get("recent_balls", [])
 
     embed.add_field(
-        name="RECENT BALLS",
-        value="  ".join(
-            f"`{ball.get('display', ball.get('runs', 0))}`"
-            for ball in recent[-12:]
-        ) or "Waiting for first delivery...",
-        inline=False,
+        name="Score",
+        value=f"**{runs}/{wickets}**",
+        inline=True,
+    )
+    embed.add_field(
+        name="Overs",
+        value=f"{overs}.{balls}",
+        inline=True,
+    )
+    embed.add_field(
+        name="Striker",
+        value=get_player_name(match.get("striker")),
+        inline=True,
+    )
+    embed.add_field(
+        name="Non-striker",
+        value=get_player_name(match.get("non_striker")),
+        inline=True,
+    )
+    embed.add_field(
+        name="Bowler",
+        value=get_player_name(match.get("current_bowler")),
+        inline=True,
     )
 
-    commentary = match.get("last_commentary")
-
-    if commentary:
+    target = match.get("target")
+    if target is not None:
         embed.add_field(
-            name="COMMENTARY",
-            value=commentary[:1024],
-            inline=False,
+            name="Target",
+            value=str(target),
+            inline=True,
         )
 
-    if match.get("result"):
-        embed.add_field(
-            name="MATCH STATUS",
-            value=str(match["result"])[:1024],
-            inline=False,
-        )
-
-    embed.set_footer(text=f"Match {match_id} • Cricket Apex")
     return embed
 
 
-class MatchView(discord.ui.View):
-    """Dynamic, stage-specific controls for a match delivery."""
+async def announce_next_stage(channel, match_id):
+    """
+    Announce which selection is needed next.
+    Call this after updating and saving the match state.
+    """
+    matches, match = get_match_or_raise(match_id)
+    status = match.get("status")
 
-    def __init__(self, match_id):
-        super().__init__(timeout=300)
-        self.match_id = str(match_id)
+    if status == "bowler_selection":
+        from views.over_selection import send_next_bowler_selection
 
-        match = get_match(self.match_id)
+        await send_next_bowler_selection(channel, match_id)
+        return
 
-        if not match or match.get("status") != "live":
-            return
+    if status == "opening_selection":
+        from views.opening_selection import send_opening_selection
 
-        stage = match.get("interaction_stage", "variation")
+        await send_opening_selection(channel, match_id)
+        return
 
-        if stage == "variation":
-            bowler = match.get("current_bowler") or {}
-            options = bowling_variations(bowler)
-            self.add_choice_buttons(
-                "variation",
-                options,
-                discord.ButtonStyle.primary,
-            )
-
-        elif stage == "length":
-            self.add_choice_buttons(
-                "length",
-                BOWLING_LENGTHS,
-                discord.ButtonStyle.secondary,
-            )
-
-        elif stage == "shot":
-            self.add_choice_buttons(
-                "shot",
-                BATTING_SHOTS,
-                discord.ButtonStyle.success,
-            )
-
-        elif stage == "intent":
-            self.add_choice_buttons(
-                "intent",
-                BATTING_INTENTS,
-                discord.ButtonStyle.primary,
-            )
-
-    def add_choice_buttons(self, category, options, style):
-        for index, value in enumerate(options):
-            button = discord.ui.Button(
-                label=value,
-                style=style,
-                row=index // 3,
-            )
-
-            async def callback(
-                interaction,
-                selected=value,
-                selected_category=category,
-            ):
-                await self.choose(
-                    interaction,
-                    selected_category,
-                    selected,
-                )
-
-            button.callback = callback
-            self.add_item(button)
-
-    def load(self):
-        matches = load_matches()
-        return matches, matches.get(self.match_id)
-
-    def stage_text(self, match):
-        if match.get("status") == "completed":
-            return "🏁 **Innings finished.**"
-
-        stage = match.get("interaction_stage", "variation")
-
-        messages = {
-            "variation": "⚡ **Bowler's turn — choose a bowling variation.**",
-            "length": "🎯 **Choose the delivery length.**",
-            "shot": "🏏 **Batter's turn — choose a shot.**",
-            "intent": "🔥 **Choose your batting intent.**",
-        }
-
-        return messages.get(stage, "🏏 Preparing the next delivery...")
-
-    async def choose(self, interaction, category, value):
-        matches, match = self.load()
-
-        if not match or match.get("status") != "live":
-            await interaction.response.send_message(
-                "This match is not live.",
-                ephemeral=True,
-            )
-            return
-
-        expected_stage = {
-            "variation": "variation",
-            "length": "length",
-            "shot": "shot",
-            "intent": "intent",
-        }.get(category)
-
-        if match.get("interaction_stage", "variation") != expected_stage:
-            await interaction.response.send_message(
-                "That choice is no longer active. Use the latest match buttons.",
-                ephemeral=True,
-            )
-            return
-
-        if category == "variation":
-            bowler = match.get("current_bowler") or {}
-
-            if value not in bowling_variations(bowler):
-                await interaction.response.send_message(
-                    "That variation is not available for this bowler.",
-                    ephemeral=True,
-                )
-                return
-
-            match["selected_variation"] = value
-            match["interaction_stage"] = "length"
-
-        elif category == "length":
-            if value not in BOWLING_LENGTHS:
-                await interaction.response.send_message(
-                    "Invalid bowling length.",
-                    ephemeral=True,
-                )
-                return
-
-            match["selected_length"] = value
-            match["interaction_stage"] = "shot"
-
-        elif category == "shot":
-            if value not in BATTING_SHOTS:
-                await interaction.response.send_message(
-                    "Invalid batting shot.",
-                    ephemeral=True,
-                )
-                return
-
-            match["selected_shot"] = value
-            match["interaction_stage"] = "intent"
-
-        elif category == "intent":
-            if value not in BATTING_INTENTS:
-                await interaction.response.send_message(
-                    "Invalid batting intent.",
-                    ephemeral=True,
-                )
-                return
-
-            match["selected_intent"] = value
-            self.resolve_ball(match)
-
-            if match.get("status") == "live":
-                match["interaction_stage"] = "variation"
-
-        save_matches(matches)
-
-        # Rebuild the view so only the current stage's buttons appear.
-        new_view = MatchView(self.match_id)
-        new_embed = build_match_embed(self.match_id)
-
-        await interaction.response.edit_message(
-            content=self.stage_text(match),
-            embed=new_embed,
-            view=new_view,
+    if status == "live":
+        await channel.send(
+            embed=score_embed(match),
+            content="🏏 Match is live. Continue with your MatchView controls.",
         )
+        return
 
-    def resolve_ball(self, match):
-        batters = match.setdefault("batters", [])
-        bowler = match.get("current_bowler")
-
-        # Temporary fallback until real card-based XI selection is connected.
-        if not batters:
-            batters.extend([
-                {
-                    "name": "Batter 1",
-                    "display_name": "Batter 1",
-                    "batting_ovr": 60,
-                    "fitness": 80,
-                    "runs": 0,
-                    "balls": 0,
-                    "team": match.get("batting_team"),
-                },
-                {
-                    "name": "Batter 2",
-                    "display_name": "Batter 2",
-                    "batting_ovr": 60,
-                    "fitness": 80,
-                    "runs": 0,
-                    "balls": 0,
-                    "team": match.get("batting_team"),
-                },
-            ])
-
-        if not bowler:
-            bowler = {
-                "name": "Bowler",
-                "display_name": "Bowler",
-                "bowling_ovr": 60,
-                "fielding_ovr": 60,
-                "fitness": 80,
-                "wickets": 0,
-                "runs_conceded": 0,
-                "legal_balls": 0,
-                "team": match.get("bowling_team"),
-                "bowling_style": "Right Arm Fast",
-            }
-            match["current_bowler"] = bowler
-
-        striker = batters[0]
-
-        result = delivery_result(
-            striker,
-            bowler,
-            match.get("selected_variation", "Seam"),
-            match.get("selected_length", "Good length"),
-            match.get("selected_shot", "Defensive block"),
-            match.get("selected_intent", "Balanced"),
-            match.get("pitch", "Normal"),
-        )
-
-        runs = int(result.get("runs", 0))
-        extra = result.get("extra")
-        wicket = bool(result.get("wicket"))
-        legal = bool(result.get("legal"))
-
-        match["runs"] = int(match.get("runs", 0)) + runs
-
-        # In this prototype, a wide is one extra run and no-ball is
-        # represented by one extra run from delivery_result().
-        batter_runs = 0 if extra == "wide" else runs
-
-        striker["runs"] = int(striker.get("runs", 0)) + batter_runs
-
-        if legal:
-            striker["balls"] = int(striker.get("balls", 0)) + 1
-            match["balls"] = int(match.get("balls", 0)) + 1
-            bowler["legal_balls"] = (
-                int(bowler.get("legal_balls", 0)) + 1
+    if status in {"innings_break", "completed"}:
+        await channel.send(
+            embed=discord.Embed(
+                title="Match Status",
+                description=f"Current state: **{status}**",
+                color=discord.Color.blurple(),
             )
-
-        bowler["runs_conceded"] = (
-            int(bowler.get("runs_conceded", 0))
-            + (0 if extra == "wide" else runs)
         )
+        return
 
-        if wicket:
-            match["wickets"] = int(match.get("wickets", 0)) + 1
-            bowler["wickets"] = int(bowler.get("wickets", 0)) + 1
+    await channel.send(f"Match state: `{status}`")
 
-        if extra == "wide":
-            display = "WD"
-        elif extra == "no-ball":
-            display = "NB"
-        elif wicket:
-            display = "W"
-        else:
-            display = str(runs)
 
-        recent = match.setdefault("recent_balls", [])
-        recent.append({
-            "runs": runs,
-            "display": display,
-            "wicket": wicket,
-            "extra": extra,
-            "description": result.get("description", ""),
-        })
-        match["recent_balls"] = recent[-24:]
-        match["last_commentary"] = result.get(
-            "description",
-            "Delivery completed.",
+async def begin_live_innings(interaction, match_id):
+    """
+    Validate selections before changing the match to live.
+    This function does not create MatchView because its constructor
+    and control API depend on your existing implementation.
+    """
+    matches, match = get_match_or_raise(match_id)
+
+    if match.get("status") not in {
+        "opening_selection",
+        "ready_to_play",
+    }:
+        await interaction.response.send_message(
+            "The match is not ready to start an innings.",
+            ephemeral=True,
         )
+        return False
 
-        # Rotate strike for odd batter runs.
-        if batter_runs % 2 == 1 and len(batters) >= 2:
-            batters[0], batters[1] = batters[1], batters[0]
+    valid, reason = validate_innings_start(match)
 
-        # Swap ends after a completed over.
-        if legal and match["balls"] % 6 == 0 and len(batters) >= 2:
-            batters[0], batters[1] = batters[1], batters[0]
-
-        overs_limit = int(
-            match.get("overs_limit", match.get("overs", 5))
+    if not valid:
+        await interaction.response.send_message(
+            reason,
+            ephemeral=True,
         )
+        return False
 
-        if (
-            int(match.get("wickets", 0)) >= 10
-            or int(match.get("balls", 0)) >= overs_limit * 6
-        ):
-            match["status"] = "completed"
-            match["state"] = "MATCH_END"
-            match["result"] = (
-                f"Innings ended: "
-                f"{match['runs']}/{match['wickets']} "
-                f"({overs_text(match['balls'])} overs)."
-            )
+    match["status"] = "live"
+    match["interaction_stage"] = "variation"
+    match.setdefault("runs", 0)
+    match.setdefault("wickets", 0)
+    match.setdefault("overs", 0)
+    match.setdefault("balls", 0)
+    match.setdefault("balls_in_over", 0)
+    match.setdefault("dismissed_players", [])
+    match.setdefault("extras", {})
+    match.setdefault("innings", 1)
+
+    save_matches(matches)
+
+    await interaction.response.send_message(
+        "✅ Innings setup validated. Your existing MatchView still needs "
+        "to be attached here to enable ball-by-ball controls.",
+        ephemeral=True,
+    )
+
+    return True
