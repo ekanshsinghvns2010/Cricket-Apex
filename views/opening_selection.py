@@ -1,6 +1,4 @@
 
-# views/opening_selection.py
-
 import discord
 from discord.ui import View, Select
 
@@ -10,13 +8,13 @@ from utils.match_utils import load_matches, save_matches
 def get_player_id(player):
     if isinstance(player, dict):
         return str(player.get("id", ""))
-    return str(player)
+    return str(player or "")
 
 
 def get_player_name(player):
     if isinstance(player, dict):
         return player.get("display_name") or player.get("name", "Unknown")
-    return str(player)
+    return str(player or "Not selected")
 
 
 def get_team_xi(match, team):
@@ -25,32 +23,29 @@ def get_team_xi(match, team):
 
 
 def get_team_name(match, team):
-    return match.get(
-        f"{team}_name",
-        team.replace("_", " ").title(),
-    )
+    return match.get(f"{team}_name", team.title())
 
 
-def find_player(xi, player_id):
+def find_player(xi, selected_id):
     return next(
-        (p for p in xi if get_player_id(p) == str(player_id)),
+        (p for p in xi if get_player_id(p) == str(selected_id)),
         None,
     )
 
 
 def build_opening_embed(match):
-    batting_team = match.get("batting_team", "team1")
-    bowling_team = match.get("bowling_team", "team2")
+    batting_team = match.get("batting_team", "red")
+    bowling_team = match.get("bowling_team", "blue")
 
     striker = match.get("striker")
     non_striker = match.get("non_striker")
     bowler = match.get("current_bowler")
 
     embed = discord.Embed(
-        title="🏏 Choose Opening Players",
+        title="🏏 Opening Players",
         description=(
-            f"**Batting:** {get_team_name(match, batting_team)}\n"
-            f"**Bowling:** {get_team_name(match, bowling_team)}\n\n"
+            f"**Batting team:** {get_team_name(match, batting_team)}\n"
+            f"**Bowling team:** {get_team_name(match, bowling_team)}\n\n"
             "The batting captain chooses two different opening batters. "
             "The bowling captain chooses the opening bowler."
         ),
@@ -72,7 +67,6 @@ def build_opening_embed(match):
         value=get_player_name(bowler) if bowler else "Not selected",
         inline=True,
     )
-
     return embed
 
 
@@ -93,45 +87,52 @@ class OpeningBatterSelect(Select):
                 description=f"Player ID: {get_player_id(player)}"[:100],
             )
             for player in xi[:25]
+            if get_player_id(player)
         ]
 
         super().__init__(
             placeholder=(
-                "Select opening striker"
+                "Choose opening striker"
                 if slot == "striker"
-                else "Select opening non-striker"
+                else "Choose opening non-striker"
             ),
             min_values=1,
             max_values=1,
             options=options,
-            custom_id=f"cricket_apex:opening_{slot}:{self.match_id}",
+            custom_id=f"cricket_apex:{self.match_id}:{slot}",
         )
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction):
         matches = load_matches()
         match = matches.get(self.match_id)
 
         if not match:
             await interaction.response.send_message(
-                "Match not found.", ephemeral=True
-            )
-            return
-
-        captain = str(match.get(f"{self.batting_team}_captain", ""))
-
-        if str(interaction.user.id) != captain:
-            await interaction.response.send_message(
-                "Only the batting captain can choose the opening batters.",
+                "Match not found.",
                 ephemeral=True,
             )
             return
 
-        if match.get("status") not in {
-            "ready_to_play",
-            "opening_selection",
-        }:
+        batting_team = match.get("batting_team", "red")
+        if batting_team != self.batting_team:
             await interaction.response.send_message(
-                "Opening selection is not open.", ephemeral=True
+                "The batting team has changed. Please reopen selection.",
+                ephemeral=True,
+            )
+            return
+
+        captain_id = str(match.get(f"{self.batting_team}_captain") or "")
+        if str(interaction.user.id) != captain_id:
+            await interaction.response.send_message(
+                "Only the batting captain can choose opening batters.",
+                ephemeral=True,
+            )
+            return
+
+        if match.get("status") != "opening_selection":
+            await interaction.response.send_message(
+                "Opening selection is not active.",
+                ephemeral=True,
             )
             return
 
@@ -140,7 +141,7 @@ class OpeningBatterSelect(Select):
 
         if not player:
             await interaction.response.send_message(
-                "That player is not in your team's confirmed XI.",
+                "That player is not in your team's XI.",
                 ephemeral=True,
             )
             return
@@ -155,13 +156,12 @@ class OpeningBatterSelect(Select):
             and get_player_id(other_player) == get_player_id(player)
         ):
             await interaction.response.send_message(
-                "The opening batters must be different players.",
+                "Opening batters must be different players.",
                 ephemeral=True,
             )
             return
 
         match[self.slot] = player
-        match["status"] = "opening_selection"
         match["interaction_stage"] = "opening_selection"
         save_matches(matches)
 
@@ -187,41 +187,48 @@ class OpeningBowlerSelect(Select):
                 description=f"Player ID: {get_player_id(player)}"[:100],
             )
             for player in xi[:25]
+            if get_player_id(player)
         ]
 
         super().__init__(
-            placeholder="Select opening bowler",
+            placeholder="Choose opening bowler",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id=f"cricket_apex:opening_bowler:{self.match_id}",
+            custom_id=f"cricket_apex:{self.match_id}:opening_bowler",
         )
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction):
         matches = load_matches()
         match = matches.get(self.match_id)
 
         if not match:
             await interaction.response.send_message(
-                "Match not found.", ephemeral=True
-            )
-            return
-
-        captain = str(match.get(f"{self.bowling_team}_captain", ""))
-
-        if str(interaction.user.id) != captain:
-            await interaction.response.send_message(
-                "Only the bowling captain can select the bowler.",
+                "Match not found.",
                 ephemeral=True,
             )
             return
 
-        if match.get("status") not in {
-            "ready_to_play",
-            "opening_selection",
-        }:
+        bowling_team = match.get("bowling_team", "blue")
+        if bowling_team != self.bowling_team:
             await interaction.response.send_message(
-                "Opening selection is not open.", ephemeral=True
+                "The bowling team has changed. Please reopen selection.",
+                ephemeral=True,
+            )
+            return
+
+        captain_id = str(match.get(f"{self.bowling_team}_captain") or "")
+        if str(interaction.user.id) != captain_id:
+            await interaction.response.send_message(
+                "Only the bowling captain can choose the opening bowler.",
+                ephemeral=True,
+            )
+            return
+
+        if match.get("status") != "opening_selection":
+            await interaction.response.send_message(
+                "Opening selection is not active.",
+                ephemeral=True,
             )
             return
 
@@ -230,13 +237,12 @@ class OpeningBowlerSelect(Select):
 
         if not player:
             await interaction.response.send_message(
-                "That player is not in the bowling team's confirmed XI.",
+                "That player is not in the bowling team's XI.",
                 ephemeral=True,
             )
             return
 
         match["current_bowler"] = player
-        match["status"] = "opening_selection"
         match["interaction_stage"] = "opening_selection"
         save_matches(matches)
 
@@ -257,23 +263,22 @@ class OpeningSelectionView(View):
         if not match:
             raise ValueError(f"Match {self.match_id} not found.")
 
-        batting_team = match.get("batting_team", "team1")
-        bowling_team = match.get("bowling_team", "team2")
+        batting_team = match.get("batting_team", "red")
+        bowling_team = match.get("bowling_team", "blue")
+
+        if not get_team_xi(match, batting_team):
+            raise ValueError("Batting team's XI is empty.")
+        if not get_team_xi(match, bowling_team):
+            raise ValueError("Bowling team's XI is empty.")
 
         self.add_item(
-            OpeningBatterSelect(
-                self.match_id, batting_team, "striker"
-            )
+            OpeningBatterSelect(self.match_id, batting_team, "striker")
         )
         self.add_item(
-            OpeningBatterSelect(
-                self.match_id, batting_team, "non_striker"
-            )
+            OpeningBatterSelect(self.match_id, batting_team, "non_striker")
         )
         self.add_item(
-            OpeningBowlerSelect(
-                self.match_id, bowling_team
-            )
+            OpeningBowlerSelect(self.match_id, bowling_team)
         )
 
     @discord.ui.button(
@@ -283,27 +288,26 @@ class OpeningSelectionView(View):
         custom_id="cricket_apex:start_innings",
         row=3,
     )
-    async def start_innings(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ):
+    async def start_innings(self, interaction, button):
         matches = load_matches()
         match = matches.get(self.match_id)
 
         if not match:
             await interaction.response.send_message(
-                "Match not found.", ephemeral=True
+                "Match not found.",
+                ephemeral=True,
             )
             return
 
-        batting_team = match.get("batting_team", "team1")
-        bowling_team = match.get("bowling_team", "team2")
+        batting_team = match.get("batting_team", "red")
+        bowling_team = match.get("bowling_team", "blue")
 
-        if str(interaction.user.id) not in {
-            str(match.get(f"{batting_team}_captain", "")),
-            str(match.get(f"{bowling_team}_captain", "")),
-        }:
+        captain_ids = {
+            str(match.get(f"{batting_team}_captain") or ""),
+            str(match.get(f"{bowling_team}_captain") or ""),
+        }
+
+        if str(interaction.user.id) not in captain_ids:
             await interaction.response.send_message(
                 "Only either captain can start the innings.",
                 ephemeral=True,
@@ -312,7 +316,8 @@ class OpeningSelectionView(View):
 
         if match.get("status") != "opening_selection":
             await interaction.response.send_message(
-                "Opening selection is not active.", ephemeral=True
+                "Opening selection is not active.",
+                ephemeral=True,
             )
             return
 
@@ -322,38 +327,59 @@ class OpeningSelectionView(View):
 
         if not striker or not non_striker or not bowler:
             await interaction.response.send_message(
-                "Select both opening batters and the opening bowler first.",
+                "Choose both opening batters and the opening bowler first.",
+                ephemeral=True,
+            )
+            return
+
+        batting_ids = {
+            get_player_id(p) for p in get_team_xi(match, batting_team)
+        }
+        bowling_ids = {
+            get_player_id(p) for p in get_team_xi(match, bowling_team)
+        }
+
+        if (
+            get_player_id(striker) not in batting_ids
+            or get_player_id(non_striker) not in batting_ids
+            or get_player_id(bowler) not in bowling_ids
+        ):
+            await interaction.response.send_message(
+                "One or more selected players are not in the confirmed XI.",
                 ephemeral=True,
             )
             return
 
         if get_player_id(striker) == get_player_id(non_striker):
             await interaction.response.send_message(
-                "The opening batters must be different.",
+                "Opening batters must be different.",
                 ephemeral=True,
             )
             return
 
         match["status"] = "live"
+        match["state"] = "MATCH"
         match["interaction_stage"] = "variation"
+        match.setdefault("innings", 1)
         match.setdefault("runs", 0)
         match.setdefault("wickets", 0)
-        match.setdefault("overs", 0)
-        match.setdefault("balls", 0)
-        match.setdefault("dismissed_players", [])
+        match.setdefault("overs_completed", 0)
+        match.setdefault("balls_in_over", 0)
+        match.setdefault("target", None)
+        match["dismissed_players"] = []
         match.setdefault("bowler_overs", {})
+        match.setdefault("recent_balls", [])
+        match["batters"] = [striker, non_striker]
+
         save_matches(matches)
 
-        await interaction.response.edit_message(
-            content="🏏 Innings started! Continue to the match controls.",
-            embed=build_opening_embed(match),
-            view=None,
-        )
+        # Build the actual live controls on the same message.
+        from views.match_view import MatchView, build_match_embed
 
-        await interaction.followup.send(
-            "Opening players confirmed. Connect your `MatchView` here "
-            "to display the ball-by-ball controls.",
-            ephemeral=True,
+        await interaction.response.edit_message(
+            content="🏏 **Innings started!**",
+            embed=build_match_embed(self.match_id),
+            view=MatchView(self.match_id),
         )
 
 
@@ -364,7 +390,14 @@ async def send_opening_selection(channel, match_id):
     if not match:
         raise ValueError(f"Match {match_id} was not found.")
 
+    if not (
+        match.get("xi_confirmed", {}).get("red", False)
+        and match.get("xi_confirmed", {}).get("blue", False)
+    ):
+        raise ValueError("Both captains must confirm their XIs first.")
+
     match["status"] = "opening_selection"
+    match["state"] = "OPENING_SELECTION"
     match["interaction_stage"] = "opening_selection"
     save_matches(matches)
 
