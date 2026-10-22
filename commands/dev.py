@@ -1,17 +1,15 @@
+
 import random
 import json
-import os
 import discord
 from discord.ext import commands
 
 from database import connect_db
-
 from utils.match_utils import (
     load_matches,
     save_matches,
     find_player_match
 )
-
 from views.matches_lobby import (
     build_lobby_embed,
     MatchLobbyView
@@ -24,38 +22,37 @@ DEVELOPER_ID = 1451236422785958040
 
 def setup_dev(bot):
 
-    @bot.command()
+    @bot.command(name="maintenance")
     async def maintenance(ctx, mode=None):
-
         if ctx.author.id != DEVELOPER_ID:
+            await ctx.send("❌ This command is only available to the developer.")
             return
 
-        if mode is None:
+        if mode is None or mode.lower() not in ("on", "off"):
             await ctx.send("Usage: g!maintenance on/off")
             return
 
-        if mode.lower() == "on":
-            with open("maintenance.json","w") as f:
-                json.dump({"enabled":True},f,indent=4)
+        enabled = mode.lower() == "on"
+
+        with open("maintenance.json", "w", encoding="utf-8") as file:
+            json.dump({"enabled": enabled}, file, indent=4)
+
+        if enabled:
             await bot.change_presence(
                 activity=discord.Activity(
                     type=discord.ActivityType.watching,
                     name="🚧 Under Maintenance"
                 )
             )
-            await ctx.send("✅ Maintenance Enabled")
-
-        elif mode.lower() == "off":
-            with open("maintenance.json","w") as f:
-                                  json.dump({"enabled":False},f,indent=4)
+            await ctx.send("✅ Maintenance enabled.")
+        else:
             await bot.change_presence(
                 activity=discord.Game("g!help | Cricket Go")
             )
-            await ctx.send("✅ Maintenance Disabled")
+            await ctx.send("✅ Maintenance disabled.")
 
     @bot.command(name="fill")
     async def fill(ctx):
-
         if ctx.author.id != DEVELOPER_ID:
             await ctx.send("❌ This command is only available to the developer.")
             return
@@ -63,98 +60,144 @@ def setup_dev(bot):
         match_id = find_player_match(ctx.author.id)
 
         if match_id is None:
-            await ctx.send("❌ You are not in any match.")
+            await ctx.send(
+                "❌ I couldn't find a match containing you. "
+                "Create a new lobby and try again."
+            )
             return
 
         matches = load_matches()
-        match = matches[match_id]
+        match = matches.get(str(match_id))
 
-        bot_names = [
-            "Aarav", "Vivaan", "Kabir", "Rohan",
-            "Aryan", "Viraj", "Aditya", "Dev",
-            "Krish", "Yash", "Ishaan", "Ayaan"
-        ]
+        if match is None:
+            await ctx.send("❌ Match data could not be loaded.")
+            return
 
-        bot_roles = [
-            "Aggressive Batter",
-            "Anchor Batter",
-            "Finisher",
-            "Fast Bowler",
-            "Fast Swing Bowler",
-            "Spinner",
-            "All-Rounder"
-        ]
-
-        # Fill Red Team
-        while len(match["red_team"]) + len(match["red_bots"]) < match["team_size"]:
-            match["red_bots"].append({
-                "name": random.choice(bot_names),
-                "role": random.choice(bot_roles)
-            })
-
-        # Fill Blue Team
-        while len(match["blue_team"]) + len(match["blue_bots"]) < match["team_size"]:
-            match["blue_bots"].append({
-                "name": random.choice(bot_names),
-                "role": random.choice(bot_roles)
-            })
-
-        save_matches(matches)
+        if match.get("status") != "lobby":
+            await ctx.send(
+                f"❌ This match is already in status: "
+                f"{match.get('status', 'unknown')}."
+            )
+            return
 
         try:
-            channel = bot.get_channel(int(match["channel_id"]))
+            team_size = int(match["team_size"])
+            match.setdefault("red_team", [])
+            match.setdefault("blue_team", [])
+            match.setdefault("red_bots", [])
+            match.setdefault("blue_bots", [])
 
-            if channel is None:
-                await ctx.send("❌ Couldn't find the match channel.")
+            bot_names = [
+                "Aarav", "Vivaan", "Kabir", "Rohan",
+                "Aryan", "Viraj", "Aditya", "Dev",
+                "Krish", "Yash", "Ishaan", "Ayaan"
+            ]
+
+            bot_roles = [
+                "Aggressive Batter",
+                "Anchor Batter",
+                "Finisher",
+                "Fast Bowler",
+                "Fast Swing Bowler",
+                "Spinner",
+                "All-Rounder"
+            ]
+
+            # Fill Red Team to its required size.
+            while (
+                len(match["red_team"]) + len(match["red_bots"])
+                < team_size
+            ):
+                match["red_bots"].append({
+                    "name": random.choice(bot_names),
+                    "role": random.choice(bot_roles)
+                })
+
+            # Fill Blue Team to its required size.
+            while (
+                len(match["blue_team"]) + len(match["blue_bots"])
+                < team_size
+            ):
+                match["blue_bots"].append({
+                    "name": random.choice(bot_names),
+                    "role": random.choice(bot_roles)
+                })
+
+            save_matches(matches)
+
+            channel_id = match.get("channel_id")
+            message_id = match.get("message_id")
+
+            if not channel_id or not message_id:
+                await ctx.send(
+                    "❌ The match has no saved lobby message. "
+                    "Create a fresh lobby with g!play."
+                )
                 return
 
-            print("Match ID:", match_id)
-            print("Channel ID:", match["channel_id"])
-            print("Message ID:", match["message_id"])
+            channel = bot.get_channel(int(channel_id))
 
-            message = await channel.fetch_message(
-                int(match["message_id"])
+            if channel is None:
+                channel = await bot.fetch_channel(int(channel_id))
+
+            message = await channel.fetch_message(int(message_id))
+
+            # Refresh the existing lobby message.
+            embed = await build_lobby_embed(ctx.guild, match_id)
+
+            red_total = (
+                len(match["red_team"]) + len(match["red_bots"])
+            )
+            blue_total = (
+                len(match["blue_team"]) + len(match["blue_bots"])
             )
 
-            embed = await build_lobby_embed(
-                ctx.guild,
-                match_id
+            both_full = (
+                red_total >= team_size and blue_total >= team_size
             )
 
-            await message.edit(
-                embed=embed,
-                view=MatchLobbyView(match_id)
+            if both_full:
+                match["status"] = "starting"
+                save_matches(matches)
+
+                await ctx.send(
+                    f"✅ Teams filled!\n"
+                    f"🔴 Red: {red_total}/{team_size}\n"
+                    f"🔵 Blue: {blue_total}/{team_size}\n"
+                    f"⏳ Starting countdown..."
+                )
+
+                # Countdown function updates the lobby and toss screen.
+                await start_countdown(message, match_id)
+
+            else:
+                await message.edit(
+                    embed=embed,
+                    view=MatchLobbyView(match_id)
+                )
+                await ctx.send(
+                    f"⚠️ Lobby refreshed, but teams are not full.\n"
+                    f"🔴 Red: {red_total}/{team_size}\n"
+                    f"🔵 Blue: {blue_total}/{team_size}"
+                )
+
+        except discord.NotFound:
+            await ctx.send(
+                "❌ The lobby message or channel could not be found. "
+                "Create a fresh lobby with g!play."
             )
-            print("✅ Lobby message edited successfully")
-
-            print("Red Humans:", len(match["red_team"]))
-            print("Red Bots:", len(match["red_bots"]))
-            print("Blue Humans:", len(match["blue_team"]))
-            print("Blue Bots:", len(match["blue_bots"]))
-            print("Team Size :", match["team_size"])
-
-            red_full = len(match["red_team"]) + len(match["red_bots"])
-            blue_full = len(match["blue_team"]) + len(match["blue_bots"])
-
-            print(f"Red total = {red_full}")
-            print(f"Blue total = {blue_full}")
-            print(f"Required = {match['team_size']}")
-
-            # Temporary force the countdown
-            print(">>> Calling countdown...")
-            await start_countdown(message, match_id)
-            print("Status before countdown call:", match["status"])
-            print(">>> Countdown finished")
-
-            await ctx.send("✅ Lobby filled and refreshed!")
-
-        except Exception as e:
-            await ctx.send(f"❌ Fill Error: {type(e).__name__}: {e}")
-            raise
+        except discord.Forbidden:
+            await ctx.send(
+                "❌ I don't have permission to read or edit the lobby message."
+            )
+        except Exception as error:
+            print(f"g!fill failed: {type(error).__name__}: {error}")
+            await ctx.send(
+                f"❌ Fill failed: {type(error).__name__}: {error}"
+            )
 
     @bot.command(name="give")
     async def give(ctx, member: discord.Member, item: str, amount: int):
-
         if ctx.author.id != DEVELOPER_ID:
             await ctx.send("❌ Only the bot owner can use this command.")
             return
@@ -166,56 +209,52 @@ def setup_dev(bot):
         conn = connect_db()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM users WHERE user_id=?", (str(member.id),))
-        user = cursor.fetchone()
+        try:
+            cursor.execute(
+                "SELECT * FROM users WHERE user_id=?",
+                (str(member.id),)
+            )
+            user = cursor.fetchone()
 
-        if not user:
-            await ctx.send("❌ User doesn't have a profile.")
+            if not user:
+                await ctx.send("❌ User doesn't have a profile.")
+                return
+
+            valid_items = [
+                "coins", "gems", "common",
+                "rare", "epic", "legendary"
+            ]
+            item = item.lower()
+
+            if item not in valid_items:
+                await ctx.send(
+                    "❌ Valid items: coins, gems, common, rare, epic, legendary"
+                )
+                return
+
+            if item == "coins":
+                cursor.execute(
+                    "UPDATE users SET coins = coins + ? WHERE user_id=?",
+                    (amount, str(member.id))
+                )
+            elif item == "gems":
+                cursor.execute(
+                    "UPDATE users SET gems = gems + ? WHERE user_id=?",
+                    (amount, str(member.id))
+                )
+            else:
+                crates = json.loads(user["crates"])
+                crates[item] = crates.get(item, 0) + amount
+
+                cursor.execute(
+                    "UPDATE users SET crates=? WHERE user_id=?",
+                    (json.dumps(crates), str(member.id))
+                )
+
+            conn.commit()
+
+        finally:
             conn.close()
-            return
-
-        valid_items = [
-            "coins",
-            "gems",
-            "common",
-            "rare",
-            "epic",
-            "legendary"
-        ]
-
-        item = item.lower()
-
-        if item not in valid_items:
-            await ctx.send(
-                "❌ Valid items: coins, gems, common, rare, epic, legendary"
-            )
-            conn.close()
-            return
-
-        if item == "coins":
-            cursor.execute(
-                "UPDATE users SET coins = coins + ? WHERE user_id=?",
-                (amount, str(member.id))
-            )
-
-        elif item == "gems":
-            cursor.execute(
-                "UPDATE users SET gems = gems + ? WHERE user_id=?",
-                (amount, str(member.id))
-            )
-
-        else:
-            crates = json.loads(user["crates"])
-
-            crates[item] = crates.get(item, 0) + amount
-
-            cursor.execute(
-                "UPDATE users SET crates=? WHERE user_id=?",
-                (json.dumps(crates), str(member.id))
-            )
-
-        conn.commit()
-        conn.close()
 
         await log_action(
             bot=bot,
@@ -235,4 +274,3 @@ def setup_dev(bot):
         await ctx.send(
             f"✅ Added **{amount} {item}** to {member.mention}."
         )
-        
