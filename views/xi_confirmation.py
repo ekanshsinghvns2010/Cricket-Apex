@@ -1,13 +1,12 @@
 
-# views/xi_confirmation.py
-
 import discord
 from discord.ui import View, Button
+
 from utils.match_utils import load_matches, save_matches
 
 
 def get_team_name(match, team):
-    return match.get(f"{team}_name", team.replace("_", " ").title())
+    return match.get(f"{team}_name", team.title())
 
 
 def get_xi(match, team):
@@ -16,78 +15,85 @@ def get_xi(match, team):
 
 
 def get_captain(match, team):
-    return str(match.get(f"{team}_captain", ""))
+    return str(match.get(f"{team}_captain") or "")
+
+
+def player_id(player):
+    if isinstance(player, dict):
+        return str(player.get("id", ""))
+    return str(player)
 
 
 def build_xi_embed(match, team):
     xi = get_xi(match, team)
-    confirmed = match.get("xi_confirmed", {})
-    team_confirmed = confirmed.get(team, False)
+    confirmed = match.get("xi_confirmed", {}).get(team, False)
 
     embed = discord.Embed(
         title=f"🏏 {get_team_name(match, team)} — Playing XI",
         description=(
-            "Review your team's selected players.\n"
-            "The captain must confirm the XI before play can begin."
+            "Review the selected player cards. "
+            "Only the team captain can confirm this XI."
         ),
-        color=discord.Color.green() if team_confirmed else discord.Color.blurple(),
+        color=(
+            discord.Color.green()
+            if confirmed
+            else discord.Color.blurple()
+        ),
     )
 
-    if xi:
-        for index, player in enumerate(xi, start=1):
-            if isinstance(player, dict):
-                name = player.get("display_name") or player.get("name", "Unknown")
-                role = player.get("role", "Player")
-                ovr = player.get("ovr", "?")
-                player_id = player.get("id", "?")
-            else:
-                name = str(player)
-                role = "Player"
-                ovr = "?"
-                player_id = "?"
+    for index, player in enumerate(xi, 1):
+        if isinstance(player, dict):
+            name = player.get("display_name") or player.get("name", "Unknown")
+            role = player.get("role", "Player")
+            ovr = player.get("ovr", "?")
+        else:
+            name, role, ovr = str(player), "Player", "?"
 
-            embed.add_field(
-                name=f"{index}. {name}",
-                value=f"Role: {role} · OVR: {ovr} · ID: {player_id}",
-                inline=False,
-            )
-    else:
         embed.add_field(
-            name="No players selected",
-            value="Select your team's 11 cards first.",
+            name=f"{index}. {name}",
+            value=f"Role: {role} · OVR: {ovr}",
             inline=False,
         )
 
-    embed.add_field(
-        name="Confirmation",
-        value="✅ Confirmed" if team_confirmed else "⏳ Awaiting captain",
-        inline=False,
-    )
+    if not xi:
+        embed.description += "\n\nNo players have been selected yet."
 
+    embed.add_field(
+        name="Squad",
+        value=f"{len(xi)}/11",
+        inline=True,
+    )
+    embed.add_field(
+        name="Captain confirmation",
+        value="✅ Confirmed" if confirmed else "⏳ Pending",
+        inline=True,
+    )
     return embed
 
 
 class XIConfirmationView(View):
     def __init__(self, match_id: str, team: str):
         super().__init__(timeout=None)
+        if team not in ("red", "blue"):
+            raise ValueError("team must be 'red' or 'blue'")
+
         self.match_id = str(match_id)
         self.team = team
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    async def interaction_check(self, interaction):
         matches = load_matches()
         match = matches.get(self.match_id)
 
         if not match:
             await interaction.response.send_message(
-                "This match no longer exists.", ephemeral=True
+                "This match no longer exists.",
+                ephemeral=True,
             )
             return False
 
-        captain_id = get_captain(match, self.team)
-
-        if str(interaction.user.id) != captain_id:
+        if str(interaction.user.id) != get_captain(match, self.team):
             await interaction.response.send_message(
-                "Only your team's captain can confirm this XI.",
+                "Only your team's captain can confirm its XI.",
                 ephemeral=True,
             )
             return False
@@ -100,24 +106,23 @@ class XIConfirmationView(View):
         emoji="✅",
         custom_id="cricket_apex:confirm_xi",
     )
-    async def confirm_xi(
-        self,
-        interaction: discord.Interaction,
-        button: Button,
-    ):
+    async def confirm_xi(self, interaction, button: Button):
         matches = load_matches()
         match = matches.get(self.match_id)
 
         if not match:
             await interaction.response.send_message(
-                "This match no longer exists.", ephemeral=True
+                "This match no longer exists.",
+                ephemeral=True,
             )
             return
 
-        status = str(match.get("status", "")).lower()
-        if status not in {"selecting", "xi_confirmation", "toss"}:
+        if match.get("status") not in {
+            "selecting",
+            "xi_confirmation",
+        }:
             await interaction.response.send_message(
-                "XI confirmation is not open right now.",
+                "XI confirmation is not open.",
                 ephemeral=True,
             )
             return
@@ -126,39 +131,39 @@ class XIConfirmationView(View):
 
         if len(xi) != 11:
             await interaction.response.send_message(
-                f"Your XI must contain exactly 11 players. Current count: {len(xi)}.",
+                f"Your XI must contain exactly 11 players; "
+                f"currently selected: {len(xi)}.",
                 ephemeral=True,
             )
             return
 
-        player_ids = [
-            str(p.get("id"))
-            for p in xi
-            if isinstance(p, dict) and p.get("id") is not None
-        ]
+        ids = [player_id(player) for player in xi]
 
-        if len(player_ids) != 11 or len(set(player_ids)) != 11:
+        if any(not value for value in ids) or len(set(ids)) != 11:
             await interaction.response.send_message(
                 "Your XI must contain 11 unique player cards.",
                 ephemeral=True,
             )
             return
 
-        match.setdefault("xi_confirmed", {})
-        match["xi_confirmed"][self.team] = True
+        # Confirm only after validating the selected squad.
+        confirmed = match.setdefault(
+            "xi_confirmed",
+            {"red": False, "blue": False},
+        )
+        confirmed[self.team] = True
 
-        if match.get("team1") and match.get("team2"):
-            team1 = "team1"
-            team2 = "team2"
+        both_confirmed = (
+            confirmed.get("red", False)
+            and confirmed.get("blue", False)
+        )
 
-            if (
-                match["xi_confirmed"].get(team1, False)
-                and match["xi_confirmed"].get(team2, False)
-            ):
-                match["status"] = "ready_to_play"
-                match["interaction_stage"] = "opening_selection"
-            else:
-                match["status"] = "xi_confirmation"
+        if both_confirmed:
+            match["status"] = "opening_selection"
+            match["state"] = "OPENING_SELECTION"
+            match["interaction_stage"] = "opening_selection"
+        else:
+            match["status"] = "xi_confirmation"
 
         save_matches(matches)
 
@@ -167,29 +172,33 @@ class XIConfirmationView(View):
             view=self,
         )
 
-        if match.get("status") == "ready_to_play":
+        if both_confirmed:
+            # Open a shared message with the opening batter/bowler menus.
+            from views.opening_selection import (
+                send_opening_selection,
+            )
+
             channel = interaction.channel
-            if channel:
-                await channel.send(
-                    "✅ Both captains confirmed their Playing XIs! "
-                    "Next: select the opening batters and opening bowler."
-                )
+            if channel is not None:
+                await send_opening_selection(channel, self.match_id)
+        else:
+            await interaction.followup.send(
+                f"{self.team.title()} XI confirmed. Waiting for the other captain.",
+                ephemeral=True,
+            )
 
 
-async def send_xi_confirmation(
-    channel: discord.abc.Messageable,
-    match_id: str,
-    team: str,
-):
+async def send_xi_confirmation(channel, match_id, team):
     matches = load_matches()
     match = matches.get(str(match_id))
 
     if not match:
         raise ValueError(f"Match {match_id} was not found.")
 
-    embed = build_xi_embed(match, team)
+    if team not in ("red", "blue"):
+        raise ValueError("team must be 'red' or 'blue'")
 
     return await channel.send(
-        embed=embed,
+        embed=build_xi_embed(match, team),
         view=XIConfirmationView(str(match_id), team),
     )
