@@ -1,3 +1,4 @@
+
 entrypoint = "main.py"
 modules = ["python-3.11"]
 
@@ -21,8 +22,3 @@ expertMode = true
 [[ports]]
 localPort = 8080
 externalPort = 80
-
-[userenv]
-
-[userenv.shared]
-TOKEN = "MTQ1NDMwMjM5MjE4MTk4MTM0MA.Gr8FfZ.2MlYCOMN0AufFg9TM508qwIs7hzeh7liCZ4uI0"
