@@ -1,4 +1,6 @@
 
+# views/next_batter.py
+
 import discord
 from discord.ui import Select, View
 
@@ -30,18 +32,42 @@ def dismissed_ids(match):
     }
 
 
+def available_batters(match):
+    batting = match.get("batting_team", "red")
+    xi = get_xi(match, batting)
+
+    dismissed = dismissed_ids(match)
+    used = {
+        str(player)
+        for player in match.get("batted_players", [])
+    }
+
+    for slot in ("striker", "non_striker"):
+        current_id = player_id(match.get(slot))
+        if current_id:
+            used.add(current_id)
+
+    return [
+        player
+        for player in xi
+        if player_id(player)
+        and player_id(player) not in dismissed
+        and player_id(player) not in used
+    ]
+
+
 def build_next_batter_embed(match):
     batting = match.get("batting_team", "red")
-    name = match.get(f"{batting}_name", batting.title())
+    team_name = match.get(f"{batting}_name", batting.title())
 
     embed = discord.Embed(
         title="🏏 Choose the Next Batter",
         description=(
-            f"**Batting team:** {name}\n"
+            f"**Batting team:** {team_name}\n"
             f"**Score:** {match.get('runs', 0)}/"
             f"{match.get('wickets', 0)}\n\n"
-            "The batting captain must choose a player who has not "
-            "already batted and is not dismissed."
+            "The batting captain must select an eligible player "
+            "who has not already batted."
         ),
         color=discord.Color.orange(),
     )
@@ -56,27 +82,8 @@ def build_next_batter_embed(match):
         value=player_name(match.get("non_striker")),
         inline=True,
     )
+
     return embed
-
-
-def available_batters(match):
-    batting = match.get("batting_team", "red")
-    xi = get_xi(match, batting)
-
-    dismissed = dismissed_ids(match)
-    used = {str(p) for p in match.get("batted_players", [])}
-
-    for slot in ("striker", "non_striker"):
-        current = player_id(match.get(slot))
-        if current:
-            used.add(current)
-
-    return [
-        player for player in xi
-        if player_id(player)
-        and player_id(player) not in dismissed
-        and player_id(player) not in used
-    ]
 
 
 class NextBatterSelect(Select):
@@ -84,12 +91,14 @@ class NextBatterSelect(Select):
         self.match_id = str(match_id)
 
         match = load_matches().get(self.match_id, {})
+        eligible = available_batters(match)
+
         options = [
             discord.SelectOption(
                 label=player_name(player)[:100],
                 value=player_id(player),
             )
-            for player in available_batters(match)[:25]
+            for player in eligible[:25]
         ]
 
         if not options:
@@ -106,7 +115,7 @@ class NextBatterSelect(Select):
             max_values=1,
             options=options,
             custom_id=f"apex:{self.match_id}:next_batter",
-            disabled=not available_batters(match),
+            disabled=not eligible,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -115,12 +124,14 @@ class NextBatterSelect(Select):
 
         if not match:
             return await interaction.response.send_message(
-                "Match not found.", ephemeral=True
+                "Match not found.",
+                ephemeral=True,
             )
 
         if match.get("status") != "batter_selection":
             return await interaction.response.send_message(
-                "A new batter is not required right now.", ephemeral=True
+                "A replacement batter is not required right now.",
+                ephemeral=True,
             )
 
         batting = match.get("batting_team", "red")
@@ -133,39 +144,51 @@ class NextBatterSelect(Select):
             )
 
         selected_id = str(self.values[0])
+
         if selected_id == "none":
             return await interaction.response.send_message(
-                "No eligible batter remains. Complete the innings.",
+                "No eligible batter remains.",
                 ephemeral=True,
             )
 
         selected = next(
             (
-                player for player in get_xi(match, batting)
+                player
+                for player in get_xi(match, batting)
                 if player_id(player) == selected_id
             ),
             None,
         )
 
-        if not selected or selected not in available_batters(match):
+        if selected is None or selected not in available_batters(match):
             return await interaction.response.send_message(
-                "That batter is unavailable. Reopen the selection.",
+                "That batter is no longer available. Please reopen selection.",
                 ephemeral=True,
             )
 
         slot = match.get("dismissed_slot", "striker")
+
         if slot not in ("striker", "non_striker"):
             slot = "striker"
 
         match[slot] = selected
-        match.setdefault("batted_players", []).append(selected_id)
+
+        batted = match.setdefault("batted_players", [])
+        if selected_id not in [str(value) for value in batted]:
+            batted.append(selected_id)
+
         match.pop("dismissed_slot", None)
-        match["status"] = "live"
-        match["interaction_stage"] = "variation"
+
+        # A wicket may also have ended the over.
+        # The bowler must be selected before another delivery.
+        if match.pop("pending_bowler_selection", False):
+            match["status"] = "bowler_selection"
+            match["interaction_stage"] = "bowler_selection"
+        else:
+            match["status"] = "live"
+            match["interaction_stage"] = "variation"
 
         save_matches(matches)
-
-        from views.match_view import MatchView, build_match_embed
 
         await interaction.response.edit_message(
             content=f"✅ **{player_name(selected)}** comes in to bat!",
@@ -173,7 +196,19 @@ class NextBatterSelect(Select):
             view=None,
         )
 
-        if interaction.channel:
+        if not interaction.channel:
+            return
+
+        if match["status"] == "bowler_selection":
+            from views.over_selection import send_next_bowler_selection
+
+            await send_next_bowler_selection(
+                interaction.channel,
+                self.match_id,
+            )
+        else:
+            from views.match_view import MatchView, build_match_embed
+
             await interaction.channel.send(
                 embed=build_match_embed(self.match_id),
                 view=MatchView(self.match_id),
@@ -197,34 +232,24 @@ async def send_next_batter_selection(channel, match_id):
     if match.get("status") != "batter_selection":
         raise ValueError("Match is not waiting for a new batter.")
 
-    available = available_batters(match)
+    eligible = available_batters(match)
 
-    if not available:
-        # No incoming batter: end this innings using the same transition
-        # logic as the delivery handler.
-        from utils.innings_result import finish_match
+    if not eligible:
+        from utils.innings_result import finish_match, build_result_embed
 
         outcome = finish_match(match)
         save_matches(matches)
 
-        if outcome.get("match_over"):
-            from utils.innings_result import build_result_embed
+        await channel.send(embed=build_result_embed(match))
 
-            await channel.send(embed=build_result_embed(match))
-        else:
+        if outcome.get("innings_break"):
             from views.opening_selection import send_opening_selection
 
-            await channel.send(
-                embed=discord.Embed(
-                    title="🏏 Innings Break",
-                    description=outcome.get("message", "Innings complete."),
-                    color=discord.Color.blurple(),
-                )
-            )
             await send_opening_selection(channel, key)
+
         return
 
-    await channel.send(
+    return await channel.send(
         embed=build_next_batter_embed(match),
         view=NextBatterView(key),
     )
