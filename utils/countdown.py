@@ -34,10 +34,18 @@ async def start_countdown(message, match_id):
             logger.error("Match %s not found", match_id)
             return
 
-        if match.get("status") in (
-            "starting", "toss", "selecting", "xi_confirmation",
-            "opening_selection", "live", "completed", "cancelled",
-        ):
+        blocked_statuses = {
+            "starting",
+            "toss",
+            "selecting",
+            "xi_confirmation",
+            "opening_selection",
+            "live",
+            "completed",
+            "cancelled",
+        }
+
+        if match.get("status") in blocked_statuses:
             logger.info(
                 "Cannot start countdown for %s; status=%s",
                 match_id,
@@ -50,20 +58,41 @@ async def start_countdown(message, match_id):
             logger.error("Match %s has no guild", match_id)
             return
 
+        # Validate team capacity using humans AND bots.
+        team_size = int(match.get("team_size", 1))
+
+        if team_size < 1:
+            await message.channel.send(
+                "❌ Match cannot start: team size must be at least 1."
+            )
+            return
+
         for team in ("red", "blue"):
-            members = match.get(f"{team}_team", [])
+            members = match.get(f"{team}_team") or []
+            bots = match.get(f"{team}_bots") or []
             captain = match.get(f"{team}_captain")
 
-            if not members or not captain:
+            total_players = len(members) + len(bots)
+
+            if total_players == 0:
                 await message.channel.send(
-                    f"❌ Match cannot start: the {team} team needs players "
-                    "and a captain."
+                    f"❌ Match cannot start: the {team} team is empty."
                 )
                 return
 
-            if len(members) != int(match.get("team_size", 1)):
+            # A team with human players needs a captain.
+            # A bot-only team does not need a Discord-user captain.
+            if members and not captain:
                 await message.channel.send(
-                    f"❌ Match cannot start: the {team} team is not full."
+                    f"❌ Match cannot start: the {team} team needs a captain."
+                )
+                return
+
+            if total_players != team_size:
+                await message.channel.send(
+                    f"❌ Match cannot start: the {team} team has "
+                    f"{total_players}/{team_size} players "
+                    "(including bots)."
                 )
                 return
 
@@ -75,6 +104,7 @@ async def start_countdown(message, match_id):
         for child in lobby_view.children:
             child.disabled = True
 
+        # Countdown
         for seconds in (5, 4, 3, 2, 1):
             matches = load_matches()
             match = matches.get(match_id)
@@ -87,7 +117,8 @@ async def start_countdown(message, match_id):
 
             status_index = next(
                 (
-                    i for i, field in enumerate(embed.fields)
+                    i
+                    for i, field in enumerate(embed.fields)
                     if field.name == "Status"
                 ),
                 None,
@@ -112,9 +143,11 @@ async def start_countdown(message, match_id):
 
         matches = load_matches()
         match = matches.get(match_id)
-        if not match:
+
+        if not match or match.get("status") != "starting":
             return
 
+        # Toss
         match["state"] = "TOSS"
         save_matches(matches)
 
@@ -122,13 +155,18 @@ async def start_countdown(message, match_id):
 
         matches = load_matches()
         match = matches.get(match_id)
+
         if not match:
             return
 
         if not match.get("batting_team") or not match.get("bowling_team"):
             logger.error("Toss failed to set teams for match %s", match_id)
+
             await message.edit(
-                content="❌ Toss failed. Please cancel and create the match again.",
+                content=(
+                    "❌ Toss failed. Please cancel and create "
+                    "the match again."
+                ),
                 embed=toss_embed,
                 view=None,
             )
@@ -138,45 +176,61 @@ async def start_countdown(message, match_id):
         match["state"] = "TOSS"
         save_matches(matches)
 
-        await message.edit(content=None, embed=toss_embed, view=None)
+        await message.edit(
+            content=None,
+            embed=toss_embed,
+            view=None,
+        )
+
         logger.info("Toss displayed for match %s", match_id)
 
         await asyncio.sleep(4)
 
         matches = load_matches()
         match = matches.get(match_id)
+
         if not match:
             return
 
-        if not match.get("red_team") or not match.get("blue_team"):
-            logger.error("Teams missing after toss for match %s", match_id)
-            await message.edit(
-                content="❌ Team data is missing. Match setup stopped.",
-                embed=toss_embed,
-                view=None,
-            )
-            return
+        # Confirm that both sides still have players, including bots.
+        for team in ("red", "blue"):
+            members = match.get(f"{team}_team") or []
+            bots = match.get(f"{team}_bots") or []
 
-        # Prepare card selection. Do not start scoring until both XIs
-        # have been selected and confirmed and opening roles are chosen.
+            if not members and not bots:
+                logger.error(
+                    "The %s team is empty after toss for match %s",
+                    team,
+                    match_id,
+                )
+                await message.channel.send(
+                    f"❌ The {team} team is empty. Match setup stopped."
+                )
+                return
+
+        # Prepare player selection.
         match["status"] = "selecting"
         match["state"] = "PLAYER_SELECTION"
         match["card_selections"] = []
         match["red_xi"] = []
         match["blue_xi"] = []
-        match["xi_confirmed"] = {"red": False, "blue": False}
+        match["xi_confirmed"] = {
+            "red": False,
+            "blue": False,
+        }
 
-        # These fields are initialized now, but no placeholder player
-        # is inserted. The real opening bowler must be selected later.
+        # Initialize match scoring state.
         match.setdefault("innings", 1)
         match.setdefault("runs", 0)
         match.setdefault("wickets", 0)
         match.setdefault("overs_completed", 0)
         match.setdefault("balls_in_over", 0)
         match.setdefault("target", None)
+
         match["overs_limit"] = int(match.get("overs", 5))
         match["batters"] = []
         match["recent_balls"] = []
+
         match.pop("current_bowler", None)
         match.pop("striker", None)
         match.pop("non_striker", None)
@@ -189,9 +243,11 @@ async def start_countdown(message, match_id):
         await message.edit(
             content=(
                 "🏏 **Toss complete! Player selection is open.**\n"
-                "Each teammate should click their team's button and select "
-                "their assigned player cards. Captains can confirm the XI "
-                "once all 11 cards are selected."
+                "Each human teammate should select their assigned "
+                "player cards. Captains can confirm the XI once the "
+                "required cards are selected.\n\n"
+                "🤖 Bot players count toward lobby capacity, but "
+                "bot-team XI selection may need additional setup."
             ),
             embed=red_embed,
             view=PlayerSelectionView(match_id, "red"),
@@ -208,15 +264,24 @@ async def start_countdown(message, match_id):
         )
 
     except discord.NotFound:
-        logger.exception("Lobby message not found for match %s", match_id)
+        logger.exception(
+            "Lobby message not found for match %s",
+            match_id,
+        )
         raise
 
     except discord.Forbidden:
-        logger.exception("Missing permission to update match %s", match_id)
+        logger.exception(
+            "Missing permission to update match %s",
+            match_id,
+        )
         raise
 
     except Exception:
-        logger.exception("Countdown or match transition failed for %s", match_id)
+        logger.exception(
+            "Countdown or match transition failed for %s",
+            match_id,
+        )
         raise
 
     finally:
