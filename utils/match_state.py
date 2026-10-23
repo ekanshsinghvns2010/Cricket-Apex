@@ -3,8 +3,7 @@
 
 from utils.match_utils import load_matches, save_matches
 
-
-VALID_TEAMS = {"team1", "team2"}
+VALID_TEAMS = {"red", "blue"}
 
 
 def get_match(match_id):
@@ -28,7 +27,7 @@ def get_team_xi(match, team):
 
 def get_player_id(player):
     if isinstance(player, dict):
-        value = player.get("id")
+        value = player.get("id") or player.get("player_id")
         return str(value) if value is not None else ""
 
     return str(player) if player is not None else ""
@@ -36,7 +35,11 @@ def get_player_id(player):
 
 def get_player_name(player):
     if isinstance(player, dict):
-        return player.get("display_name") or player.get("name", "Unknown")
+        return (
+            player.get("display_name")
+            or player.get("name")
+            or "Unknown"
+        )
 
     return str(player) if player is not None else "Unknown"
 
@@ -59,10 +62,11 @@ def validate_xi(match, team):
 
 
 def is_dismissed(match, player):
-    dismissed = match.get("dismissed_players", [])
-    dismissed_ids = {str(value) for value in dismissed}
-
-    return get_player_id(player) in dismissed_ids
+    dismissed = {
+        get_player_id(item)
+        for item in match.get("dismissed_players", [])
+    }
+    return get_player_id(player) in dismissed
 
 
 def record_dismissal(match, player):
@@ -73,10 +77,11 @@ def record_dismissal(match, player):
 
     dismissed = match.setdefault("dismissed_players", [])
 
-    if player_id not in {str(value) for value in dismissed}:
+    if player_id not in {
+        get_player_id(item) for item in dismissed
+    }:
         dismissed.append(player_id)
 
-    # Clear a dismissed batter from the active batting positions.
     if get_player_id(match.get("striker")) == player_id:
         match["striker"] = None
 
@@ -91,21 +96,32 @@ def validate_opening_batters(match):
     if not striker or not non_striker:
         return False, "Both opening batters must be selected."
 
-    if get_player_id(striker) == get_player_id(non_striker):
+    striker_id = get_player_id(striker)
+    non_striker_id = get_player_id(non_striker)
+
+    if striker_id == non_striker_id:
         return False, "The opening batters must be different."
 
     batting_team = match.get("batting_team")
-    xi = get_team_xi(match, batting_team)
 
-    xi_ids = {get_player_id(player) for player in xi}
+    if batting_team not in VALID_TEAMS:
+        return False, "The batting team is invalid."
 
-    if get_player_id(striker) not in xi_ids:
-        return False, "The striker must belong to the confirmed XI."
+    xi_ids = {
+        get_player_id(player)
+        for player in get_team_xi(match, batting_team)
+    }
 
-    if get_player_id(non_striker) not in xi_ids:
-        return False, "The non-striker must belong to the confirmed XI."
+    if striker_id not in xi_ids:
+        return False, "The striker must belong to the batting XI."
 
-    if is_dismissed(match, striker) or is_dismissed(match, non_striker):
+    if non_striker_id not in xi_ids:
+        return False, "The non-striker must belong to the batting XI."
+
+    if is_dismissed(match, striker):
+        return False, "A dismissed player cannot bat again."
+
+    if is_dismissed(match, non_striker):
         return False, "A dismissed player cannot bat again."
 
     return True, "Opening batters valid."
@@ -118,12 +134,17 @@ def validate_bowler(match):
         return False, "Select a bowler before delivering a ball."
 
     bowling_team = match.get("bowling_team")
-    xi = get_team_xi(match, bowling_team)
 
-    if get_player_id(bowler) not in {
-        get_player_id(player) for player in xi
-    }:
-        return False, "The bowler must belong to the bowling team's XI."
+    if bowling_team not in VALID_TEAMS:
+        return False, "The bowling team is invalid."
+
+    xi_ids = {
+        get_player_id(player)
+        for player in get_team_xi(match, bowling_team)
+    }
+
+    if get_player_id(bowler) not in xi_ids:
+        return False, "The bowler must belong to the bowling XI."
 
     return True, "Bowler valid."
 
@@ -136,20 +157,10 @@ def record_delivery(
     batter=None,
     extra_type=None,
 ):
-    """
-    Record one delivery.
+    """Record a delivery. Runs include any extras."""
 
-    runs: runs added to the team score, including extras.
-    wicket: whether a dismissal occurred.
-    legal: whether this delivery counts as a legal ball.
-    batter: player dismissed, when applicable.
-    extra_type: optional extra label, e.g. 'wide' or 'no_ball'.
-
-    The caller is responsible for determining dismissal type and
-    whether the delivery is legal according to the match engine.
-    """
     if match.get("status") != "live":
-        raise ValueError("Cannot record a delivery when the match is not live.")
+        raise ValueError("The match is not live.")
 
     if not isinstance(runs, int) or runs < 0:
         raise ValueError("Runs must be a non-negative integer.")
@@ -157,8 +168,7 @@ def record_delivery(
     match["runs"] = int(match.get("runs", 0)) + runs
 
     if wicket:
-        if batter is None:
-            batter = match.get("striker")
+        batter = batter or match.get("striker")
 
         if batter is None:
             raise ValueError("A dismissed batter must be identified.")
@@ -170,6 +180,7 @@ def record_delivery(
         match["balls"] = int(match.get("balls", 0)) + 1
 
     balls_per_over = int(match.get("balls_per_over", 6))
+
     if balls_per_over <= 0:
         raise ValueError("balls_per_over must be positive.")
 
@@ -177,20 +188,19 @@ def record_delivery(
     match["overs"] = total_balls // balls_per_over
     match["balls_in_over"] = total_balls % balls_per_over
 
-    match.setdefault("extras", {})
-    if extra_type:
-        match["extras"][extra_type] = (
-            int(match["extras"].get(extra_type, 0)) + runs
-        )
+    extras = match.setdefault("extras", {})
 
-    max_overs = int(match.get("max_overs", 20))
-    max_wickets = max(0, len(get_team_xi(
-        match, match.get("batting_team", "team1")
-    )) - 1)
+    if extra_type:
+        extras[extra_type] = int(extras.get(extra_type, 0)) + runs
+
+    max_overs = int(match.get("overs", match.get("max_overs", 20)))
+    batting_team = match.get("batting_team", "red")
+    max_wickets = max(0, len(get_team_xi(match, batting_team)) - 1)
 
     target = match.get("target")
     target_reached = (
-        target is not None and match["runs"] >= int(target)
+        target is not None
+        and match["runs"] >= int(target)
     )
 
     innings_over = (
@@ -217,16 +227,18 @@ def record_delivery(
 
 
 def prepare_second_innings(match):
-    """
-    Reset innings-specific score fields and set the chase target.
-    Call after the first innings has ended.
-    """
-    first_innings_runs = int(match.get("runs", 0))
+    """Switch teams and reset innings-specific state."""
 
-    match["target"] = first_innings_runs + 1
+    first_innings_runs = int(match.get("runs", 0))
 
     batting_team = match.get("batting_team")
     bowling_team = match.get("bowling_team")
+
+    if batting_team not in VALID_TEAMS or bowling_team not in VALID_TEAMS:
+        raise ValueError("Cannot start the chase: teams are not configured.")
+
+    match["first_innings_runs"] = first_innings_runs
+    match["target"] = first_innings_runs + 1
 
     match["batting_team"] = bowling_team
     match["bowling_team"] = batting_team
@@ -234,14 +246,21 @@ def prepare_second_innings(match):
     match["runs"] = 0
     match["wickets"] = 0
     match["overs"] = 0
+    match["overs_completed"] = 0
     match["balls"] = 0
     match["balls_in_over"] = 0
     match["extras"] = {}
+
     match["dismissed_players"] = []
+    match["batted_players"] = []
+
     match["striker"] = None
     match["non_striker"] = None
     match["current_bowler"] = None
     match["previous_bowler"] = None
+
+    match["delivery_choices"] = {}
+    match["dismissed_slot"] = None
     match["interaction_stage"] = "opening_selection"
     match["status"] = "opening_selection"
     match["innings"] = 2
