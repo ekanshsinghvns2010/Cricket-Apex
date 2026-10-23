@@ -3,13 +3,11 @@
 
 from utils.match_utils import load_matches, save_matches
 
-
-VALID_TEAMS = ("team1", "team2")
+VALID_TEAMS = ("red", "blue")
 
 
 def get_match(match_id):
-    matches = load_matches()
-    return matches.get(str(match_id))
+    return load_matches().get(str(match_id))
 
 
 def update_match(match_id, updates):
@@ -36,11 +34,20 @@ def start_xi_selection(match_id):
     if not match.get("batting_team") or not match.get("bowling_team"):
         raise ValueError("The toss must finish before XI selection.")
 
+    if (
+        match["batting_team"] not in VALID_TEAMS
+        or match["bowling_team"] not in VALID_TEAMS
+        or match["batting_team"] == match["bowling_team"]
+    ):
+        raise ValueError("The toss returned invalid teams.")
+
     match["status"] = "selecting"
-    match["xi_confirmed"] = {"team1": False, "team2": False}
-    match["card_selections"] = {"team1": {}, "team2": {}}
-    match["team1_xi"] = []
-    match["team2_xi"] = []
+    match["state"] = "PLAYER_SELECTION"
+    match["xi_confirmed"] = {"red": False, "blue": False}
+    match["card_selections"] = []
+    match["red_xi"] = []
+    match["blue_xi"] = []
+    match.pop("xi_confirmation_posted", None)
     match["interaction_stage"] = "card_selection"
 
     save_matches(matches)
@@ -64,22 +71,27 @@ def start_xi_confirmation(match_id):
 
         if len(xi) != 11:
             raise ValueError(
-                f"{team} must have exactly 11 unique player cards."
+                f"{team} must have exactly 11 player cards."
             )
 
         player_ids = [
-            str(player.get("id", ""))
+            str(player.get("id") or player.get("player_id") or "")
             for player in xi
             if isinstance(player, dict)
         ]
 
-        if len(player_ids) != 11 or len(set(player_ids)) != 11:
+        if (
+            len(player_ids) != 11
+            or any(not player_id for player_id in player_ids)
+            or len(set(player_ids)) != 11
+        ):
             raise ValueError(
                 f"{team} has missing or duplicate player IDs."
             )
 
     match["status"] = "xi_confirmation"
-    match["xi_confirmed"] = {"team1": False, "team2": False}
+    match["state"] = "XI_CONFIRMATION"
+    match["xi_confirmed"] = {"red": False, "blue": False}
     match["interaction_stage"] = "xi_confirmation"
 
     save_matches(matches)
@@ -95,7 +107,11 @@ def start_opening_selection(match_id):
 
     match = matches[key]
 
-    if match.get("status") not in {"xi_confirmation", "ready_to_play"}:
+    if match.get("status") not in {
+        "xi_confirmation",
+        "ready_to_play",
+        "opening_selection",
+    }:
         raise ValueError("Both XIs must be confirmed first.")
 
     confirmed = match.get("xi_confirmed", {})
@@ -103,7 +119,23 @@ def start_opening_selection(match_id):
     if not all(confirmed.get(team, False) for team in VALID_TEAMS):
         raise ValueError("Both captains must confirm their XIs.")
 
+    for team in VALID_TEAMS:
+        xi = match.get(f"{team}_xi", [])
+        ids = [
+            str(player.get("id") or player.get("player_id") or "")
+            for player in xi
+            if isinstance(player, dict)
+        ]
+
+        if (
+            len(ids) != 11
+            or any(not player_id for player_id in ids)
+            or len(set(ids)) != 11
+        ):
+            raise ValueError(f"{team} does not have a valid XI.")
+
     match["status"] = "opening_selection"
+    match["state"] = "OPENING_SELECTION"
     match["interaction_stage"] = "opening_selection"
     match["striker"] = None
     match["non_striker"] = None
@@ -125,6 +157,11 @@ def start_live_match(match_id):
     if match.get("status") != "opening_selection":
         raise ValueError("Opening selection is not active.")
 
+    confirmed = match.get("xi_confirmed", {})
+
+    if not all(confirmed.get(team, False) for team in VALID_TEAMS):
+        raise ValueError("Both captains must confirm their XIs.")
+
     striker = match.get("striker")
     non_striker = match.get("non_striker")
     bowler = match.get("current_bowler")
@@ -134,41 +171,56 @@ def start_live_match(match_id):
             "Select the opening striker, non-striker, and bowler first."
         )
 
-    striker_id = str(striker.get("id", ""))
-    non_striker_id = str(non_striker.get("id", ""))
+    def get_id(player):
+        if isinstance(player, dict):
+            return str(player.get("id") or player.get("player_id") or "")
+        return str(player or "")
 
-    if not striker_id or not non_striker_id or striker_id == non_striker_id:
+    striker_id = get_id(striker)
+    non_striker_id = get_id(non_striker)
+    bowler_id = get_id(bowler)
+
+    if (
+        not striker_id
+        or not non_striker_id
+        or striker_id == non_striker_id
+    ):
         raise ValueError("Opening batters must be distinct valid players.")
 
     batting_team = match.get("batting_team")
     bowling_team = match.get("bowling_team")
 
+    if batting_team not in VALID_TEAMS or bowling_team not in VALID_TEAMS:
+        raise ValueError("The batting or bowling team is invalid.")
+
     batting_ids = {
-        str(p.get("id", ""))
-        for p in match.get(f"{batting_team}_xi", [])
-        if isinstance(p, dict)
+        get_id(player)
+        for player in match.get(f"{batting_team}_xi", [])
     }
     bowling_ids = {
-        str(p.get("id", ""))
-        for p in match.get(f"{bowling_team}_xi", [])
-        if isinstance(p, dict)
+        get_id(player)
+        for player in match.get(f"{bowling_team}_xi", [])
     }
 
     if striker_id not in batting_ids or non_striker_id not in batting_ids:
         raise ValueError("Opening batters must belong to the batting XI.")
 
-    if str(bowler.get("id", "")) not in bowling_ids:
+    if bowler_id not in bowling_ids:
         raise ValueError("The bowler must belong to the bowling XI.")
 
     match["status"] = "live"
+    match["state"] = "MATCH"
     match["interaction_stage"] = "variation"
-    match.setdefault("runs", 0)
-    match.setdefault("wickets", 0)
-    match.setdefault("overs", 0)
-    match.setdefault("balls", 0)
-    match.setdefault("balls_in_over", 0)
-    match.setdefault("dismissed_players", [])
-    match.setdefault("extras", {})
+    match["runs"] = 0
+    match["wickets"] = 0
+    match["overs_completed"] = 0
+    match["balls"] = 0
+    match["balls_in_over"] = 0
+    match["dismissed_players"] = []
+    match["batted_players"] = [striker_id, non_striker_id]
+    match["extras"] = {}
+    match["delivery_choices"] = {}
+    match["previous_bowler"] = None
     match.setdefault("innings", 1)
 
     save_matches(matches)
